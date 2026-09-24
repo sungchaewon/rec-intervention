@@ -3,7 +3,14 @@ import pandas as pd
 import pytest
 
 from recint.data import InteractionData, leave_last_out
-from recint.states import HistoryLengthState, assign_state_groups
+from recint.states import (
+    HistoryLengthState,
+    PredictionEntropyState,
+    ScoreMarginState,
+    StateContext,
+    TopScoreState,
+    assign_state_groups,
+)
 
 
 @pytest.fixture
@@ -34,7 +41,18 @@ def test_leave_last_out_uses_timestamp(interactions):
 
 
 def test_history_length_state(interactions):
-    np.testing.assert_array_equal(HistoryLengthState().compute(interactions), [3.0, 2.0, 1.0])
+    context = StateContext(interactions, eval_users=np.array([2, 0]), base_scores=np.zeros((2, 3)))
+    np.testing.assert_array_equal(HistoryLengthState().compute(context), [1.0, 3.0])
+
+
+def test_confidence_states():
+    scores = np.array([[2.0, 1.0, -np.inf], [0.0, 0.0, 0.0]])
+    context = StateContext(train=None, eval_users=np.arange(2), base_scores=scores)  # type: ignore[arg-type]
+    entropy = PredictionEntropyState().compute(context)
+    assert 0.0 < entropy[0] < 1.0  # two candidates, unequal mass
+    np.testing.assert_allclose(entropy[1], 1.0)  # uniform over three candidates
+    np.testing.assert_allclose(TopScoreState().compute(context), [2.0, 0.0])
+    np.testing.assert_allclose(ScoreMarginState().compute(context), [1.0, 0.0])
 
 
 def test_fixed_grouping_edges_go_to_lower_group():

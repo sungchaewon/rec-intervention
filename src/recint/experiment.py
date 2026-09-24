@@ -1,7 +1,8 @@
 """End-to-end observed-intervention-effect experiment.
 
-data -> split -> base model -> intervention -> per-user metrics -> gain
-     -> user state -> state-conditioned summary
+data -> split -> base model -> user states (from base scores)
+     -> each intervention action -> per-user metrics -> gain
+     -> per-action / per-state summary + routing headroom
 """
 
 from __future__ import annotations
@@ -13,12 +14,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from recint.analysis import build_user_effect_table, summarize_by_state
+from recint.analysis import build_user_effect_table, routing_headroom, summarize_effects
 from recint.data import EvaluationSplit, InteractionData, leave_last_out, load_interactions
 from recint.interventions import build_intervention
 from recint.metrics import compute_ranking_metrics, metric_name
 from recint.models import Recommender, build_model, load_model, mask_seen_items, top_k_items
-from recint.states import assign_state_groups, build_state_extractor
+from recint.states import StateContext, assign_state_groups, build_state_extractor
 from recint.utils import make_rngs, set_global_seed
 
 RNG_STREAMS = ["data", "analysis"]
@@ -26,8 +27,9 @@ RNG_STREAMS = ["data", "analysis"]
 
 @dataclass(frozen=True)
 class ExperimentResult:
-    user_effects: pd.DataFrame
-    state_summary: pd.DataFrame
+    user_effects: pd.DataFrame  # one row per (user, action)
+    summary: pd.DataFrame  # per (action, state, group, metric)
+    headroom: pd.DataFrame  # per (state, group, metric): best uniform vs oracle
 
 
 def prepare_run(
@@ -56,63 +58,90 @@ def obtain_base_model(config: dict[str, Any], train: InteractionData) -> Recomme
     return load_model(config["model"], path, train)
 
 
-def run_intervention_experiment(config: dict[str, Any]) -> ExperimentResult:
-    validate_candidate_size(config)
-    data, split, rngs = prepare_run(config)
+def action_label(intervention_config: dict[str, Any]) -> str:
+    return intervention_config.get("label", intervention_config["name"])
 
+
+def validate_interventions(config: dict[str, Any]) -> None:
+    labels = [action_label(c) for c in config["interventions"]]
+    if not labels:
+        raise ValueError("`interventions` must list at least one action")
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"Intervention labels must be unique (set `label`), got {labels}")
+    max_k = max(config["evaluation"]["k_values"])
+    for intervention_config in config["interventions"]:
+        # Rerankers can only return their candidates; top-K beyond that is ill-defined.
+        candidate_size = intervention_config.get("params", {}).get("candidate_size")
+        if candidate_size is not None and candidate_size < max_k:
+            raise ValueError(
+                f"{action_label(intervention_config)}: candidate_size={candidate_size} "
+                f"must be >= max k {max_k}"
+            )
+
+
+def compute_states(
+    state_configs: list[dict[str, Any]], context: StateContext
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, list[str]]]:
+    """State values for every configured state; groups only for states with `grouping`."""
+    values, groups, groupings = {}, {}, {}
+    for state_config in state_configs:
+        name = state_config["name"]
+        values[name] = build_state_extractor(state_config).compute(context)
+        grouping = state_config.get("grouping")
+        if grouping is not None:
+            groups[name] = assign_state_groups(
+                values[name], grouping["method"], grouping["cut_points"], grouping["labels"]
+            )
+            groupings[name] = list(grouping["labels"])
+    return values, groups, groupings
+
+
+def run_intervention_experiment(config: dict[str, Any]) -> ExperimentResult:
+    validate_interventions(config)
+    data, split, rngs = prepare_run(config)
     model = obtain_base_model(config, split.train)
-    intervention = build_intervention(config["intervention"]).fit(split.train)
 
     # Dense (n_eval_users, n_items) scores: fine up to ML-1M scale; batch for larger catalogs.
     base_scores = model.score(split.eval_users)
     mask_seen_items(base_scores, split.train.user_item_matrix(), split.eval_users)
-    intervened_scores = intervention.apply(split.eval_users, base_scores)
+    state_values, state_groups, groupings = compute_states(
+        config["states"], StateContext(split.train, split.eval_users, base_scores)
+    )
 
     evaluation = config["evaluation"]
-    k_values = evaluation["k_values"]
+    k_values, metrics = evaluation["k_values"], evaluation["metrics"]
     max_k = max(k_values)
-    base_metrics = compute_ranking_metrics(
-        top_k_items(base_scores, max_k), split.targets, evaluation["metrics"], k_values
-    )
-    intervention_metrics = compute_ranking_metrics(
-        top_k_items(intervened_scores, max_k), split.targets, evaluation["metrics"], k_values
-    )
+    base_metrics = compute_ranking_metrics(top_k_items(base_scores, max_k), split.targets, metrics, k_values)
 
-    state_config = config["state"]
-    state_values = build_state_extractor(state_config).compute(split.train)[split.eval_users]
-    grouping = state_config["grouping"]
-    state_groups = assign_state_groups(
-        state_values, grouping["method"], grouping["cut_points"], grouping["labels"]
-    )
+    tables = []
+    for intervention_config in config["interventions"]:
+        intervention = build_intervention(intervention_config).fit(split.train)
+        intervened = intervention.apply(split.eval_users, base_scores)
+        intervention_metrics = compute_ranking_metrics(
+            top_k_items(intervened, max_k), split.targets, metrics, k_values
+        )
+        tables.append(
+            build_user_effect_table(
+                user_ids=data.user_ids[split.eval_users],
+                state_values=state_values,
+                state_groups=state_groups,
+                base_metrics=base_metrics,
+                intervention_metrics=intervention_metrics,
+                neutral_threshold=config["analysis"]["neutral_threshold"],
+                action=action_label(intervention_config),
+            )
+        )
+    user_effects = pd.concat(tables, ignore_index=True)
 
-    analysis = config["analysis"]
-    user_effects = build_user_effect_table(
-        user_ids=data.user_ids[split.eval_users],
-        state_values=state_values,
-        state_groups=state_groups,
-        base_metrics=base_metrics,
-        intervention_metrics=intervention_metrics,
-        neutral_threshold=analysis["neutral_threshold"],
-        intervention_name=config["intervention"]["name"],
-    )
-    metric_names = [metric_name(m, k) for m in evaluation["metrics"] for k in k_values]
-    state_summary = summarize_by_state(
+    metric_names = [metric_name(m, k) for m in metrics for k in k_values]
+    bootstrap = config["analysis"]["bootstrap"]
+    summary = summarize_effects(
         user_effects,
         metrics=metric_names,
-        group_order=grouping["labels"],
-        n_resamples=analysis["bootstrap"]["n_resamples"],
-        confidence=analysis["bootstrap"]["confidence"],
+        groupings=groupings,
+        n_resamples=bootstrap["n_resamples"],
+        confidence=bootstrap["confidence"],
         rng=rngs["analysis"],
     )
-    return ExperimentResult(user_effects=user_effects, state_summary=state_summary)
-
-
-def validate_candidate_size(config: dict[str, Any]) -> None:
-    """Rerankers can only return their candidates; top-K beyond that is ill-defined."""
-    candidate_size = config["intervention"].get("params", {}).get("candidate_size")
-    if candidate_size is not None and candidate_size < max(config["evaluation"]["k_values"]):
-        raise ValueError(
-            f"intervention candidate_size={candidate_size} must be >= max k "
-            f"{max(config['evaluation']['k_values'])}"
-        )
-
+    headroom = routing_headroom(user_effects, metric_names, groupings)
+    return ExperimentResult(user_effects=user_effects, summary=summary, headroom=headroom)

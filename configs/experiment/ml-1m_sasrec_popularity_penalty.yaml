@@ -7,21 +7,34 @@ seed: 42
 
 dataset: ../dataset/ml-1m.yaml
 model: ../model/sasrec.yaml
-intervention: ../intervention/popularity_penalty.yaml
 
 # Written by train.py, loaded by analyze_intervention.py (relative to the working directory).
 model_checkpoint: outputs/checkpoints/ml-1m_sasrec_seed42/model.pt
+
+# Actions applied to the same users; each needs a unique `label` (defaults to `name`).
+interventions:
+  - {name: popularity_penalty, label: popularity_w0.1, params: {penalty_weight: 0.1, candidate_size: 50}}
+  - {name: popularity_penalty, label: popularity_w0.25, params: {penalty_weight: 0.25, candidate_size: 50}}
+  - {name: popularity_penalty, label: popularity_w0.5, params: {penalty_weight: 0.5, candidate_size: 50}}
 
 evaluation:
   metrics: [hr, ndcg]
   k_values: [10, 20]
 
-state:
-  name: history_length
-  grouping:
-    method: quantile          # quantile: cut_points are quantile levels; fixed: raw values
-    cut_points: [0.3333, 0.6667]
-    labels: [short, medium, long]
+# All states are stored per user; states with `grouping` also get per-group summaries.
+states:
+  - name: history_length
+    grouping:
+      method: quantile        # quantile: cut_points are quantile levels; fixed: raw values
+      cut_points: [0.3333, 0.6667]
+      labels: [short, medium, long]
+  - name: prediction_entropy
+    grouping:
+      method: quantile
+      cut_points: [0.3333, 0.6667]
+      labels: [confident, medium, uncertain]
+  - name: top_score
+  - name: score_margin
 
 analysis:
   neutral_threshold: 0.0      # |gain| <= threshold -> neutral
