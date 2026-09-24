@@ -1,0 +1,24 @@
+# GPU variant of environment.yml (keep the two in sync; only `pytorch` differs).
+#   conda env create -f environment.cuda.yml
+#
+# conda-forge picks the CUDA build matching the installed NVIDIA driver
+# (e.g. cuda129 for CUDA 12.x drivers, cuda130 for 13.x). CUDA toolkit
+# libraries come from conda; only the driver must be installed on the host.
+name: rec-intervention
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy=2.3
+  - pandas=2.3
+  - scipy=1.16
+  - scikit-learn=1.7
+  - matplotlib=3.10
+  - tqdm=4.67
+  - pyyaml=6.0
+  - pytest=8.4
+  - pytorch=2.13.*=cuda*
+  - pip:
+      - -e .

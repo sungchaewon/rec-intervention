@@ -68,9 +68,10 @@ src/recint/
   states/          # user-state extractors and grouping
   metrics/         # HR@K, NDCG@K, intervention gain, effect labels
   analysis/        # per-user effect table, state-conditioned summary, bootstrap
-  utils/           # config loading/overrides, seeding
+  utils/           # config loading/overrides, seeding, device selection
   experiment.py    # end-to-end pipeline used by scripts and tests
 scripts/
+  check_env.py             # verify environment + devices on a new machine
   prepare_data.py          # materialize a dataset config as CSV
   analyze_intervention.py  # run an experiment, print + save the state table
 tests/
@@ -84,28 +85,46 @@ selected by `name` in YAML.
 
 ## Setup
 
-Requires Miniconda/Anaconda.
+Requires Miniconda/Anaconda. Both environment files use Python 3.11 and
+conda-forge only, and install this repo in editable mode (`pip install -e .`).
+
+| File | Use for | PyTorch |
+|---|---|---|
+| `environment.yml` | laptops, CI, CPU-only machines | CPU build |
+| `environment.cuda.yml` | GPU servers (Linux) | CUDA build matching the host driver |
+
+### GPU server
+
+Only the NVIDIA driver is needed on the host; the CUDA libraries come from conda.
+
+```bash
+git clone https://github.com/sungchaewon/rec-intervention.git
+cd rec-intervention
+conda env create -f environment.cuda.yml
+conda activate rec-intervention
+
+python scripts/check_env.py --require-cuda   # versions, GPU list, matmul on each device
+pytest                                       # unit + end-to-end smoke tests
+```
+
+To update an existing environment after pulling changes:
+`conda env update -f environment.cuda.yml --prune`.
+
+Data and outputs default to `data/` and `outputs/` under the working directory.
+To keep them on another disk, override the paths, e.g.
+`--output-dir /mnt/storage/rec-intervention/outputs`.
+
+### Local / CPU
 
 ```bash
 conda env create -f environment.yml
 conda activate rec-intervention
+python scripts/check_env.py
 pytest
 ```
 
-The environment uses Python 3.11 and conda-forge only. The package is installed
-in editable mode (`pip install -e .`), so `import recint` works anywhere.
-
-### GPU (optional)
-
-The default environment has the CPU build of PyTorch. For a CUDA build, which
-conda-forge pairs with the matching MKL/OpenMP:
-
-```bash
-conda install -n rec-intervention -c conda-forge "pytorch=2.13.*=cuda*"
-```
-
-Do not `pip install torch` into this environment on Windows: the PyPI wheel
-conflicts with conda-forge's OpenMP runtime.
+Do not `pip install torch` into these environments: on Windows the PyPI wheel
+conflicts with conda-forge's MKL/OpenMP runtime.
 
 ## Quick Start
 

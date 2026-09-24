@@ -5,7 +5,7 @@
 # PyTorch comes from conda-forge (not PyPI) so that it shares the MKL/OpenMP
 # runtime with numpy/scipy; mixing the PyPI wheel with conda-forge's MKL fails
 # on Windows (duplicate OpenMP / DLL load errors). The CPU build is pinned so no
-# GPU is assumed; see README "GPU (optional)" for the CUDA build.
+# GPU is assumed; GPU servers use environment.cuda.yml (keep the two in sync).
 name: rec-intervention
 channels:
   - conda-forge

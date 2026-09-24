@@ -1,0 +1,5 @@
+# Normalize line endings so files authored on Windows run cleanly on Linux servers.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.pdf binary
