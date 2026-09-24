@@ -1,0 +1,21 @@
+# MovieLens-1M. Prepare once with:
+#   python scripts/prepare_data.py --config configs/dataset/ml-1m.yaml
+# Paths are resolved relative to the working directory.
+name: ml-1m
+source: csv
+path: data/processed/ml-1m/interactions.csv
+columns:
+  user_id: user_id
+  item_id: item_id
+  timestamp: timestamp
+split:
+  method: leave_last_out
+  min_train_interactions: 2
+
+preparation:
+  source: movielens
+  variant: ml-1m
+  raw_dir: data/raw
+  min_rating: null   # null: every rating is an implicit interaction (common in sequential rec)
+  user_core: 5
+  item_core: 5

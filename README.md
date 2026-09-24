@@ -37,6 +37,7 @@ stay separate in code.
 |---|---|
 | Interaction data abstraction (user, item, optional timestamp), leave-last-out split | Implemented |
 | Synthetic toy dataset; CSV loader | Implemented |
+| MovieLens-1M download (checksum-verified) + preprocessing (rating filter, dedupe, k-core) | Implemented |
 | Metrics: HR@K, NDCG@K (per user) | Implemented |
 | Intervention gain + beneficial / neutral / harmful classification | Implemented |
 | Base model: item co-occurrence (training-free, for pipeline development only) | Implemented |
@@ -44,14 +45,14 @@ stay separate in code.
 | User state: history length, grouped into short / medium / long | Implemented |
 | State-conditioned summary: bootstrap CI of mean gain, Wilcoxon signed-rank p | Implemented |
 | SASRec, LightGCN backbones; `scripts/train.py` | Planned |
-| Real datasets (e.g. MovieLens) preprocessing | Planned |
+| Additional real datasets (e.g. Amazon reviews) | Planned |
 | States: preference drift/stability, recommendation uncertainty, popularity exposure | Planned |
 | More interventions; multi-intervention comparison | Planned |
 | Plotting utilities | Planned |
 | Routing extension (RecSys) | Planned |
 
-No results on real data exist yet. The toy output below is a pipeline check,
-not a finding.
+No research results exist yet. The toy and ML-1M runs below use a
+training-free, non-sequential base model and are pipeline checks, not findings.
 
 ## Repository Layout
 
@@ -62,7 +63,8 @@ configs/
   intervention/    # intervention         (popularity_penalty.yaml, identity.yaml)
   experiment/      # references the above + state, evaluation, analysis settings
 src/recint/
-  data/            # InteractionData, leave_last_out, synthetic generator
+  data/            # InteractionData, leave_last_out, synthetic generator,
+                   # MovieLens download, preprocessing (filter/dedupe/k-core)
   models/          # Recommender base class, top-k / seen-item masking, backbones
   interventions/   # Intervention base class and implementations
   states/          # user-state extractors and grouping
@@ -72,7 +74,7 @@ src/recint/
   experiment.py    # end-to-end pipeline used by scripts and tests
 scripts/
   check_env.py             # verify environment + devices on a new machine
-  prepare_data.py          # materialize a dataset config as CSV
+  prepare_data.py          # download + preprocess a dataset config to CSV
   analyze_intervention.py  # run an experiment, print + save the state table
 tests/
 outputs/           # experiment results (git-ignored)
@@ -158,12 +160,32 @@ python scripts/analyze_intervention.py --config configs/experiment/toy_popularit
   --override dataset=../dataset/toy_csv.yaml
 ```
 
+## MovieLens-1M
+
+```bash
+python scripts/prepare_data.py --config configs/dataset/ml-1m.yaml
+python scripts/analyze_intervention.py --config configs/experiment/ml-1m_popularity_penalty.yaml
+```
+
+The first command downloads `ml-1m.zip` from GroupLens into `data/raw/` (checksum
+verified, skipped if already present). It then writes
+`data/processed/ml-1m/interactions.csv` and `stats.json`. Preprocessing is
+defined in the `preparation` section of `configs/dataset/ml-1m.yaml`: all
+ratings are treated as implicit feedback, duplicates are dropped keeping the
+earliest, and an iterative 5-core filter is applied. The result has
+999,611 interactions, 6,040 users, and 3,416 items.
+
+The data is subject to the [GroupLens license](https://files.grouplens.org/datasets/movielens/ml-1m-README.txt)
+and is not stored in this repository.
+
 ## Reproducibility
 
 - A single `seed` in the experiment config drives independent RNG streams per
   stage (`data`, `analysis`) via `numpy.random.SeedSequence`.
 - The resolved config is saved next to every result.
-- Ties in rankings are broken by item index.
+- Ties in rankings are broken by item index. Interactions with equal
+  timestamps keep their source-file order (stable sort), which also fixes the
+  held-out item under leave-last-out.
 
 ## License
 

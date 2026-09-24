@@ -22,5 +22,6 @@ outputs/*
 
 # Editor / local tool settings
 .claude/settings.local.json
+.claude/settings.json
 .DS_Store
 Thumbs.db
