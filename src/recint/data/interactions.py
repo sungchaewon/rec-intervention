@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -77,6 +78,26 @@ class InteractionData:
     def history_lengths(self) -> np.ndarray:
         """Number of interactions per user index."""
         return np.bincount(self.interactions[USER_IDX].to_numpy(), minlength=self.n_users)
+
+    def fingerprint(self) -> str:
+        """SHA-256 of (user_idx, item_idx) rows and catalog sizes.
+
+        Stored with trained models so a checkpoint cannot silently be used with
+        different data or a different split.
+        """
+        digest = hashlib.sha256(f"{self.n_users}:{self.n_items}:".encode())
+        for column in (USER_IDX, ITEM_IDX):
+            digest.update(np.ascontiguousarray(self.interactions[column].to_numpy(np.int64)).tobytes())
+        return digest.hexdigest()
+
+    def user_sequences(self) -> list[np.ndarray]:
+        """Item indices per user index, in time order (row order breaks ties)."""
+        frame = self.interactions.assign(**{_ORDER: np.arange(len(self.interactions))})
+        sort_keys = [USER_IDX, TIMESTAMP, _ORDER] if self.has_timestamp else [USER_IDX, _ORDER]
+        frame = frame.sort_values(sort_keys, kind="mergesort")
+        items = frame[ITEM_IDX].to_numpy()
+        boundaries = np.cumsum(np.bincount(frame[USER_IDX].to_numpy(), minlength=self.n_users))
+        return np.split(items, boundaries[:-1])
 
 
 @dataclass(frozen=True)

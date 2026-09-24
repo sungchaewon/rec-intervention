@@ -1,0 +1,32 @@
+# 1. python scripts/prepare_data.py --config configs/dataset/ml-1m.yaml
+# 2. python scripts/train.py --config configs/experiment/ml-1m_sasrec_popularity_penalty.yaml
+# 3. python scripts/analyze_intervention.py --config configs/experiment/ml-1m_sasrec_popularity_penalty.yaml
+# Referenced configs are resolved relative to this file.
+name: ml-1m_sasrec_popularity_penalty
+seed: 42
+
+dataset: ../dataset/ml-1m.yaml
+model: ../model/sasrec.yaml
+intervention: ../intervention/popularity_penalty.yaml
+
+# Written by train.py, loaded by analyze_intervention.py (relative to the working directory).
+model_checkpoint: outputs/checkpoints/ml-1m_sasrec_seed42/model.pt
+
+evaluation:
+  metrics: [hr, ndcg]
+  k_values: [10, 20]
+
+state:
+  name: history_length
+  grouping:
+    method: quantile          # quantile: cut_points are quantile levels; fixed: raw values
+    cut_points: [0.3333, 0.6667]
+    labels: [short, medium, long]
+
+analysis:
+  neutral_threshold: 0.0      # |gain| <= threshold -> neutral
+  bootstrap:
+    n_resamples: 1000
+    confidence: 0.95
+
+output_dir: outputs           # relative to the working directory

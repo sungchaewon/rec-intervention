@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import scipy.sparse as sp
@@ -17,6 +19,14 @@ class Recommender(ABC):
     @abstractmethod
     def score(self, user_indices: np.ndarray) -> np.ndarray:
         """Return a (len(user_indices), n_items) float score matrix."""
+
+    def save(self, path: Path) -> None:
+        raise NotImplementedError(f"{type(self).__name__} does not support checkpoints")
+
+    @classmethod
+    def load(cls, path: Path, train: InteractionData, **params: Any) -> Recommender:
+        """Restore a fitted model; `train` must be the data it was fitted on."""
+        raise NotImplementedError(f"{cls.__name__} does not support checkpoints")
 
 
 def mask_seen_items(

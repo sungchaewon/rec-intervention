@@ -1,0 +1,16 @@
+# SASRec trained with full-catalog cross-entropy (see recint/models/sasrec.py).
+name: sasrec
+params:
+  max_len: 200            # most recent items kept per user sequence
+  hidden_dim: 64
+  n_blocks: 2
+  n_heads: 1
+  dropout: 0.2
+  learning_rate: 0.001
+  weight_decay: 0.0
+  batch_size: 128
+  max_epochs: 200
+  patience: 10            # epochs without validation improvement before stopping
+  eval_k: 10              # early stopping on validation NDCG@eval_k (full ranking)
+  eval_batch_size: 1024
+  device: auto            # auto | cpu | cuda | cuda:N

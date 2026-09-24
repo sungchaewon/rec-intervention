@@ -7,15 +7,17 @@ data -> split -> base model -> intervention -> per-user metrics -> gain
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from recint.analysis import build_user_effect_table, summarize_by_state
-from recint.data import leave_last_out, load_interactions
+from recint.data import EvaluationSplit, InteractionData, leave_last_out, load_interactions
 from recint.interventions import build_intervention
 from recint.metrics import compute_ranking_metrics, metric_name
-from recint.models import build_model, mask_seen_items, top_k_items
+from recint.models import Recommender, build_model, load_model, mask_seen_items, top_k_items
 from recint.states import assign_state_groups, build_state_extractor
 from recint.utils import make_rngs, set_global_seed
 
@@ -28,21 +30,40 @@ class ExperimentResult:
     state_summary: pd.DataFrame
 
 
-def run_intervention_experiment(config: dict[str, Any]) -> ExperimentResult:
-    validate_candidate_size(config)
+def prepare_run(
+    config: dict[str, Any],
+) -> tuple[InteractionData, EvaluationSplit, dict[str, np.random.Generator]]:
+    """Seed everything, load data, and split. Shared by training and analysis so
+    both always see the same train/test split."""
     seed = config["seed"]
     set_global_seed(seed)
     rngs = make_rngs(seed, RNG_STREAMS)
-
     data = load_interactions(config["dataset"], rngs["data"])
     split = leave_last_out(data, config["dataset"]["split"]["min_train_interactions"])
     if len(split.eval_users) == 0:
         raise ValueError("No users have enough interactions for evaluation")
+    return data, split, rngs
 
-    model = build_model(config["model"]).fit(split.train)
+
+def obtain_base_model(config: dict[str, Any], train: InteractionData) -> Recommender:
+    """Load `model_checkpoint` if configured (trained by scripts/train.py), else fit."""
+    checkpoint = config.get("model_checkpoint")
+    if checkpoint is None:
+        return build_model(config["model"]).fit(train)
+    path = Path(checkpoint)
+    if not path.exists():
+        raise FileNotFoundError(f"{path} not found; train it first with scripts/train.py")
+    return load_model(config["model"], path, train)
+
+
+def run_intervention_experiment(config: dict[str, Any]) -> ExperimentResult:
+    validate_candidate_size(config)
+    data, split, rngs = prepare_run(config)
+
+    model = obtain_base_model(config, split.train)
     intervention = build_intervention(config["intervention"]).fit(split.train)
 
-    # Dense (n_eval_users, n_items) scores: fine for toy data; batch for real catalogs.
+    # Dense (n_eval_users, n_items) scores: fine up to ML-1M scale; batch for larger catalogs.
     base_scores = model.score(split.eval_users)
     mask_seen_items(base_scores, split.train.user_item_matrix(), split.eval_users)
     intervened_scores = intervention.apply(split.eval_users, base_scores)
