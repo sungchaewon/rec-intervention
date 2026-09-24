@@ -1,0 +1,26 @@
+# Referenced configs are resolved relative to this file.
+name: toy_popularity_penalty
+seed: 42
+
+dataset: ../dataset/toy.yaml
+model: ../model/item_cooccurrence.yaml
+intervention: ../intervention/popularity_penalty.yaml
+
+evaluation:
+  metrics: [hr, ndcg]
+  k_values: [10]
+
+state:
+  name: history_length
+  grouping:
+    method: quantile          # quantile: cut_points are quantile levels; fixed: raw values
+    cut_points: [0.3333, 0.6667]
+    labels: [short, medium, long]
+
+analysis:
+  neutral_threshold: 0.0      # |gain| <= threshold -> neutral
+  bootstrap:
+    n_resamples: 1000
+    confidence: 0.95
+
+output_dir: outputs           # relative to the working directory

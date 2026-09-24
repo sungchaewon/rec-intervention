@@ -1,0 +1,4 @@
+# Training-free base recommender used to exercise the pipeline.
+name: item_cooccurrence
+params:
+  similarity: cosine   # cosine | count

@@ -1,0 +1,12 @@
+# Toy data materialized by: python scripts/prepare_data.py --config configs/dataset/toy.yaml
+# `path` is resolved relative to the working directory.
+name: toy_csv
+source: csv
+path: data/toy/interactions.csv
+columns:
+  user_id: user_id
+  item_id: item_id
+  timestamp: timestamp
+split:
+  method: leave_last_out
+  min_train_interactions: 2

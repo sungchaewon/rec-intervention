@@ -1,0 +1,4 @@
+name: popularity_penalty
+params:
+  penalty_weight: 0.5    # weight on min-max normalized log popularity
+  candidate_size: 50     # rerank the base top-N; must be >= max evaluation k

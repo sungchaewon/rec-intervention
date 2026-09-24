@@ -1,0 +1,3 @@
+# Control arm: returns base scores unchanged (gain must be exactly 0).
+name: identity
+params: {}

@@ -1,0 +1,16 @@
+# Synthetic implicit-feedback data (see recint/data/synthetic.py).
+name: toy
+source: synthetic
+params:
+  n_users: 1000
+  n_items: 300
+  n_clusters: 10
+  min_history: 3
+  max_history: 150
+  history_log_mean: 2.5    # median history length ~ exp(2.5) ~ 12
+  history_log_std: 0.9
+  popularity_exponent: 1.0
+  in_cluster_prob: 0.7
+split:
+  method: leave_last_out
+  min_train_interactions: 2

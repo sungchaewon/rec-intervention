@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rec-intervention"
+version = "0.1.0"
+description = "State-dependent intervention effect analysis for recommender systems."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+# Runtime deps of the `recint` package itself. The full research environment
+# (torch, plotting, testing) is defined in environment.yml.
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "scipy>=1.11",
+    "pyyaml>=6.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

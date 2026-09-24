@@ -1,0 +1,26 @@
+# Reproducible research environment.
+#   conda env create -f environment.yml
+#   conda activate rec-intervention
+#
+# PyTorch comes from conda-forge (not PyPI) so that it shares the MKL/OpenMP
+# runtime with numpy/scipy; mixing the PyPI wheel with conda-forge's MKL fails
+# on Windows (duplicate OpenMP / DLL load errors). The CPU build is pinned so no
+# GPU is assumed; see README "GPU (optional)" for the CUDA build.
+name: rec-intervention
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy=2.3
+  - pandas=2.3
+  - scipy=1.16
+  - scikit-learn=1.7
+  - matplotlib=3.10
+  - tqdm=4.67
+  - pyyaml=6.0
+  - pytest=8.4
+  - pytorch=2.13.*=cpu*
+  - pip:
+      - -e .
