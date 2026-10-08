@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from recint.analysis import (
     ALL_USERS,
@@ -9,8 +10,13 @@ from recint.analysis import (
     routing_headroom,
     summarize_effects,
 )
-from recint.data import InteractionData
-from recint.interventions import IdentityIntervention, PopularityPenaltyReranker
+from recint.data import InteractionData, ItemCategories
+from recint.interventions import (
+    CalibrationReranker,
+    IdentityIntervention,
+    MMRReranker,
+    PopularityPenaltyReranker,
+)
 from recint.models import top_k_items
 
 
@@ -107,3 +113,50 @@ def _effects(action: str, base, intervened) -> pd.DataFrame:
         neutral_threshold=0.0,
         action=action,
     )
+
+
+def _catalog() -> tuple[InteractionData, ItemCategories]:
+    # Items 0 and 1 are always consumed together (near-duplicates); 2 and 3 are distinct.
+    frame = pd.DataFrame(
+        {"user_id": [0, 0, 1, 1, 2, 3, 4, 4], "item_id": [0, 1, 0, 1, 2, 3, 2, 4]}
+    )
+    data = InteractionData.from_frame(frame)
+    categories = pd.DataFrame(
+        {"item_id": [0, 1, 2, 3, 4, 4], "category": ["a", "a", "b", "a", "a", "b"]}
+    )
+    return data, ItemCategories.from_frame(categories, data.item_ids)
+
+
+def test_item_categories_are_normalized_per_item():
+    _, categories = _catalog()
+    dense = categories.distribution.toarray()
+    np.testing.assert_allclose(dense.sum(axis=1), 1.0)
+    np.testing.assert_allclose(dense[4], [0.5, 0.5])  # item with two categories
+
+
+def test_mmr_full_relevance_keeps_base_order_and_diversifies_otherwise():
+    data, _ = _catalog()
+    base = np.array([[0.9, 0.8, 0.5, 0.4, -np.inf]])
+    keep = MMRReranker(relevance_weight=1.0, candidate_size=4).fit(data).apply(np.array([0]), base)
+    np.testing.assert_array_equal(top_k_items(keep, 4), top_k_items(base, 4))
+    diverse = MMRReranker(relevance_weight=0.3, candidate_size=4).fit(data).apply(np.array([0]), base)
+    assert top_k_items(diverse, 2).tolist() == [[0, 2]]  # near-duplicate item 1 is pushed down
+    assert np.isneginf(diverse[0, 4])
+
+
+def test_calibration_matches_history_categories():
+    data, categories = _catalog()
+    # User 2's history is item 2 only (category b); base prefers category-a items.
+    base = np.array([[0.9, 0.8, -np.inf, 0.7, 0.1]])
+    off = CalibrationReranker(0.0, candidate_size=4, list_size=2).fit(data, categories)
+    np.testing.assert_array_equal(
+        top_k_items(off.apply(np.array([2]), base), 3), top_k_items(base, 3)
+    )
+    on = CalibrationReranker(0.9, candidate_size=4, list_size=2).fit(data, categories)
+    assert top_k_items(on.apply(np.array([2]), base), 1)[0, 0] == 4  # the only item with category b
+
+
+def test_calibration_requires_categories():
+    data, _ = _catalog()
+    with pytest.raises(ValueError, match="categories"):
+        CalibrationReranker(0.5, candidate_size=4, list_size=2).fit(data)

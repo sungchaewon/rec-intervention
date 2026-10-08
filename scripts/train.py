@@ -4,7 +4,7 @@ Uses the same data, split, and seed as analyze_intervention.py, which then loads
 the checkpoint.
 
 Example:
-    python scripts/train.py --config configs/experiment/ml-1m_sasrec_popularity_penalty.yaml
+    python scripts/train.py --config configs/experiment/ml-1m_sasrec_reranking.yaml
     python scripts/train.py --config ... --override seed=7 --override model_checkpoint=outputs/checkpoints/ml-1m_sasrec_seed7/model.pt
 """
 

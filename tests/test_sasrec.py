@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from recint.data import InteractionData, leave_last_out
-from recint.data.interactions import load_interactions
+from recint.data import load_dataset
 from recint.models.sasrec import (
     PAD_TOKEN,
     SASRecNetwork,
@@ -21,7 +21,7 @@ from recint.models.sasrec import (
 from recint.utils import load_experiment_config, set_global_seed
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SASREC_CONFIG = PROJECT_ROOT / "configs" / "experiment" / "ml-1m_sasrec_popularity_penalty.yaml"
+SASREC_CONFIG = PROJECT_ROOT / "configs" / "experiment" / "ml-1m_sasrec_reranking.yaml"
 TINY_PARAMS = {
     "max_len": 12, "hidden_dim": 16, "n_blocks": 1, "n_heads": 2, "dropout": 0.1,
     "learning_rate": 0.01, "weight_decay": 0.0, "batch_size": 32, "max_epochs": 3,
@@ -71,7 +71,7 @@ def test_network_is_causal():
 @pytest.fixture(scope="module")
 def toy_train() -> InteractionData:
     config = load_experiment_config(SASREC_CONFIG, TINY_OVERRIDES)
-    data = load_interactions(config["dataset"], np.random.default_rng(0))
+    data = load_dataset(config["dataset"], np.random.default_rng(0)).interactions
     return leave_last_out(data, min_train_interactions=2).train
 
 

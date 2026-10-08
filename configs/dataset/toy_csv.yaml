@@ -3,6 +3,7 @@
 name: toy_csv
 source: csv
 path: data/toy/interactions.csv
+item_categories_path: data/toy/item_categories.csv
 columns:
   user_id: user_id
   item_id: item_id

@@ -1,18 +1,20 @@
+# Requires: python scripts/prepare_data.py --config configs/dataset/ml-1m.yaml
 # Referenced configs are resolved relative to this file.
-name: toy_popularity_penalty
+name: ml-1m_reranking
 seed: 42
 
-dataset: ../dataset/toy.yaml
+dataset: ../dataset/ml-1m.yaml
 model: ../model/item_cooccurrence.yaml
 
 # Actions applied to the same users; each needs a unique `label` (defaults to `name`).
 interventions:
-  - {name: popularity_penalty, label: popularity_w0.1, params: {penalty_weight: 0.1, candidate_size: 50}}
-  - {name: popularity_penalty, label: popularity_w0.5, params: {penalty_weight: 0.5, candidate_size: 50}}
+  - {name: popularity_penalty, label: popularity, params: {penalty_weight: 0.25, candidate_size: 50}}
+  - {name: mmr, label: mmr, params: {relevance_weight: 0.8, candidate_size: 50}}
+  - {name: calibration, label: calibration, params: {calibration_weight: 0.5, candidate_size: 50, list_size: 20}}
 
 evaluation:
   metrics: [hr, ndcg]
-  k_values: [10]
+  k_values: [10, 20]
 
 # All states are stored per user; states with `grouping` also get per-group summaries.
 states:

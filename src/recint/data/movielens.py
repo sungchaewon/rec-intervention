@@ -25,7 +25,11 @@ class MovieLensVariant:
     sha256: str  # computed from a download matching the official MD5
     ratings_member: str
     separator: bytes
+    movies_member: str  # MovieID<sep>Title<sep>Genre1|Genre2
+    movies_encoding: str
 
+
+GENRE_SEPARATOR = "|"
 
 MOVIELENS_VARIANTS: dict[str, MovieLensVariant] = {
     "ml-1m": MovieLensVariant(
@@ -33,6 +37,8 @@ MOVIELENS_VARIANTS: dict[str, MovieLensVariant] = {
         sha256="a6898adb50b9ca05aa231689da44c217cb524e7ebd39d264c56e2832f2c54e20",
         ratings_member="ml-1m/ratings.dat",
         separator=b"::",
+        movies_member="ml-1m/movies.dat",
+        movies_encoding="latin-1",
     ),
 }
 
@@ -87,3 +93,18 @@ def read_movielens_ratings(zip_path: Path, variant: str) -> pd.DataFrame:
         names=["user_id", "item_id", "rating", "timestamp"],
         dtype={"user_id": "int64", "item_id": "int64", "rating": "float64", "timestamp": "int64"},
     )
+
+
+def read_movielens_genres(zip_path: Path, variant: str) -> pd.DataFrame:
+    """Return long-format (item_id, category) with one row per movie genre."""
+    spec = _get_variant(variant)
+    with zipfile.ZipFile(zip_path) as archive:
+        lines = archive.read(spec.movies_member).decode(spec.movies_encoding).splitlines()
+    separator = spec.separator.decode()
+    rows = []
+    for line in lines:
+        if not line:
+            continue
+        movie_id, _title, genres = line.split(separator)
+        rows.extend((int(movie_id), genre) for genre in genres.split(GENRE_SEPARATOR))
+    return pd.DataFrame(rows, columns=["item_id", "category"])

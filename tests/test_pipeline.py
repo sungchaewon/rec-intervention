@@ -12,7 +12,7 @@ from recint.experiment import run_intervention_experiment
 from recint.utils import load_experiment_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-TOY_CONFIG = PROJECT_ROOT / "configs" / "experiment" / "toy_popularity_penalty.yaml"
+TOY_CONFIG = PROJECT_ROOT / "configs" / "experiment" / "toy_reranking.yaml"
 SMALL_OVERRIDES = [
     "dataset.params.n_users=150",
     "dataset.params.n_items=80",
@@ -27,7 +27,7 @@ def _run(overrides: list[str]):
 
 def test_toy_pipeline_outputs():
     result = _run([])
-    actions = {"popularity_w0.1", "popularity_w0.5"}
+    actions = {"popularity", "mmr", "calibration"}
     n_users = result.user_effects["user_id"].nunique()
     assert set(result.user_effects["action"]) == actions
     assert len(result.user_effects) == n_users * len(actions)
@@ -88,6 +88,6 @@ def test_cli_smoke(tmp_path):
         check=True,
     )
     assert "Routing headroom" in completed.stdout
-    run_dir = tmp_path / "toy_popularity_penalty"
+    run_dir = tmp_path / "toy_reranking"
     for name in ("config.yaml", "user_effects.csv", "summary.csv", "headroom.csv"):
         assert (run_dir / name).exists()

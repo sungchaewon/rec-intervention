@@ -10,7 +10,8 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
-from recint.data.synthetic import generate_synthetic_interactions
+from recint.data.categories import ItemCategories
+from recint.data.synthetic import generate_synthetic_dataset
 
 USER_ID = "user_id"
 ITEM_ID = "item_id"
@@ -134,20 +135,38 @@ def leave_last_out(data: InteractionData, min_train_interactions: int) -> Evalua
     )
 
 
-def load_interactions(dataset_config: dict[str, Any], rng: np.random.Generator) -> InteractionData:
-    """Build `InteractionData` from a dataset config (`source: synthetic | csv`)."""
+@dataclass(frozen=True)
+class Dataset:
+    interactions: InteractionData
+    item_categories: ItemCategories | None
+
+
+def load_dataset(dataset_config: dict[str, Any], rng: np.random.Generator) -> Dataset:
+    """Build a `Dataset` from a dataset config (`source: synthetic | csv`).
+
+    CSV datasets get item categories from the optional `item_categories_path`
+    (long format: item_id, category).
+    """
     source = dataset_config["source"]
     if source == "synthetic":
-        frame = generate_synthetic_interactions(rng=rng, **dataset_config.get("params", {}))
-        return InteractionData.from_frame(frame, timestamp_col=TIMESTAMP)
+        frame, categories = generate_synthetic_dataset(rng=rng, **dataset_config.get("params", {}))
+        data = InteractionData.from_frame(frame, timestamp_col=TIMESTAMP)
+        return Dataset(data, ItemCategories.from_frame(categories, data.item_ids))
     if source == "csv":
         columns = {USER_ID: USER_ID, ITEM_ID: ITEM_ID, TIMESTAMP: None}
         columns.update(dataset_config.get("columns", {}))
         frame = pd.read_csv(dataset_config["path"])
-        return InteractionData.from_frame(
+        data = InteractionData.from_frame(
             frame,
             user_col=columns[USER_ID],
             item_col=columns[ITEM_ID],
             timestamp_col=columns[TIMESTAMP],
         )
+        categories_path = dataset_config.get("item_categories_path")
+        categories = (
+            ItemCategories.from_frame(pd.read_csv(categories_path), data.item_ids)
+            if categories_path
+            else None
+        )
+        return Dataset(data, categories)
     raise ValueError(f"Unknown dataset source {source!r}; expected 'synthetic' or 'csv'")

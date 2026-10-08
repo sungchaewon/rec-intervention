@@ -12,7 +12,7 @@ from typing import Any
 
 import pandas as pd
 
-from recint.data.movielens import download_movielens, read_movielens_ratings
+from recint.data.movielens import download_movielens, read_movielens_genres, read_movielens_ratings
 
 USER_ID, ITEM_ID, TIMESTAMP, RATING = "user_id", "item_id", "timestamp", "rating"
 
@@ -61,13 +61,15 @@ def interaction_stats(frame: pd.DataFrame) -> dict[str, float]:
     }
 
 
-def load_raw_interactions(preparation: dict[str, Any]) -> pd.DataFrame:
+def load_raw_dataset(preparation: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    """Return (raw interactions, item categories as long-format item_id/category or None)."""
     source = preparation["source"]
     if source == "movielens":
         zip_path = download_movielens(
             preparation["variant"], Path(preparation["raw_dir"]), preparation.get("url")
         )
-        return read_movielens_ratings(zip_path, preparation["variant"])
+        variant = preparation["variant"]
+        return read_movielens_ratings(zip_path, variant), read_movielens_genres(zip_path, variant)
     raise ValueError(f"Unknown preparation source {source!r}; expected 'movielens'")
 
 

@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 
 from recint.analysis import build_user_effect_table, routing_headroom, summarize_effects
-from recint.data import EvaluationSplit, InteractionData, leave_last_out, load_interactions
+from recint.data import Dataset, EvaluationSplit, InteractionData, leave_last_out, load_dataset
 from recint.interventions import build_intervention
 from recint.metrics import compute_ranking_metrics, metric_name
 from recint.models import Recommender, build_model, load_model, mask_seen_items, top_k_items
@@ -34,17 +34,17 @@ class ExperimentResult:
 
 def prepare_run(
     config: dict[str, Any],
-) -> tuple[InteractionData, EvaluationSplit, dict[str, np.random.Generator]]:
+) -> tuple[Dataset, EvaluationSplit, dict[str, np.random.Generator]]:
     """Seed everything, load data, and split. Shared by training and analysis so
     both always see the same train/test split."""
     seed = config["seed"]
     set_global_seed(seed)
     rngs = make_rngs(seed, RNG_STREAMS)
-    data = load_interactions(config["dataset"], rngs["data"])
-    split = leave_last_out(data, config["dataset"]["split"]["min_train_interactions"])
+    dataset = load_dataset(config["dataset"], rngs["data"])
+    split = leave_last_out(dataset.interactions, config["dataset"]["split"]["min_train_interactions"])
     if len(split.eval_users) == 0:
         raise ValueError("No users have enough interactions for evaluation")
-    return data, split, rngs
+    return dataset, split, rngs
 
 
 def obtain_base_model(config: dict[str, Any], train: InteractionData) -> Recommender:
@@ -98,7 +98,7 @@ def compute_states(
 
 def run_intervention_experiment(config: dict[str, Any]) -> ExperimentResult:
     validate_interventions(config)
-    data, split, rngs = prepare_run(config)
+    dataset, split, rngs = prepare_run(config)
     model = obtain_base_model(config, split.train)
 
     # Dense (n_eval_users, n_items) scores: fine up to ML-1M scale; batch for larger catalogs.
@@ -115,14 +115,14 @@ def run_intervention_experiment(config: dict[str, Any]) -> ExperimentResult:
 
     tables = []
     for intervention_config in config["interventions"]:
-        intervention = build_intervention(intervention_config).fit(split.train)
+        intervention = build_intervention(intervention_config).fit(split.train, dataset.item_categories)
         intervened = intervention.apply(split.eval_users, base_scores)
         intervention_metrics = compute_ranking_metrics(
             top_k_items(intervened, max_k), split.targets, metrics, k_values
         )
         tables.append(
             build_user_effect_table(
-                user_ids=data.user_ids[split.eval_users],
+                user_ids=dataset.interactions.user_ids[split.eval_users],
                 state_values=state_values,
                 state_groups=state_groups,
                 base_metrics=base_metrics,

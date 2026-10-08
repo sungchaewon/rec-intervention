@@ -4,6 +4,7 @@
 name: ml-1m
 source: csv
 path: data/processed/ml-1m/interactions.csv
+item_categories_path: data/processed/ml-1m/item_categories.csv   # movie genres
 columns:
   user_id: user_id
   item_id: item_id

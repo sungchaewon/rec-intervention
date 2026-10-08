@@ -5,7 +5,12 @@ import pandas as pd
 import pytest
 
 from recint.data import movielens
-from recint.data.movielens import MovieLensVariant, download_movielens, read_movielens_ratings
+from recint.data.movielens import (
+    MovieLensVariant,
+    download_movielens,
+    read_movielens_genres,
+    read_movielens_ratings,
+)
 from recint.data.preprocess import (
     deduplicate_interactions,
     filter_min_rating,
@@ -57,11 +62,14 @@ def fake_movielens(tmp_path: Path, monkeypatch) -> Path:
     source = tmp_path / "source.zip"
     with zipfile.ZipFile(source, "w") as archive:
         archive.writestr("fake/ratings.dat", "1::10::5::100\n1::11::3::50\n2::10::4::70\n")
+        archive.writestr("fake/movies.dat", "10::A (1999)::Drama|Comedy\n11::B (2000)::Drama\n".encode("latin-1"))
     variant = MovieLensVariant(
         url=source.as_uri(),
         sha256=movielens.sha256_of_file(source),
         ratings_member="fake/ratings.dat",
         separator=b"::",
+        movies_member="fake/movies.dat",
+        movies_encoding="latin-1",
     )
     monkeypatch.setitem(movielens.MOVIELENS_VARIANTS, "fake", variant)
     return source
@@ -73,10 +81,14 @@ def test_download_verifies_and_reads(fake_movielens, tmp_path):
     assert list(ratings.columns) == ["user_id", "item_id", "rating", "timestamp"]
     assert ratings.shape == (3, 4)
     assert ratings.loc[1].tolist() == [1, 11, 3.0, 50]
+    genres = read_movielens_genres(zip_path, "fake")
+    assert list(zip(genres["item_id"], genres["category"])) == [(10, "Drama"), (10, "Comedy"), (11, "Drama")]
 
 
 def test_download_rejects_checksum_mismatch(fake_movielens, tmp_path, monkeypatch):
-    bad = MovieLensVariant(fake_movielens.as_uri(), "0" * 64, "fake/ratings.dat", b"::")
+    bad = MovieLensVariant(
+        fake_movielens.as_uri(), "0" * 64, "fake/ratings.dat", b"::", "fake/movies.dat", "latin-1"
+    )
     monkeypatch.setitem(movielens.MOVIELENS_VARIANTS, "fake", bad)
     with pytest.raises(ValueError, match="Checksum mismatch"):
         download_movielens("fake", tmp_path / "raw")

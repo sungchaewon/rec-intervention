@@ -3,7 +3,8 @@
 Each item belongs to a latent cluster and has a Zipf-like popularity. Each user
 prefers one cluster and draws a variable-length history (log-normal length, so
 history sparsity varies across users) without replacement, mixing in-cluster
-and popularity-driven choices. Not intended to model any real dataset.
+and popularity-driven choices. Clusters double as item categories. Not intended
+to model any real dataset.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 
-def generate_synthetic_interactions(
+def generate_synthetic_dataset(
     n_users: int,
     n_items: int,
     n_clusters: int,
@@ -23,7 +24,8 @@ def generate_synthetic_interactions(
     popularity_exponent: float,
     in_cluster_prob: float,
     rng: np.random.Generator,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return (interactions: user_id, item_id, timestamp; item categories: item_id, category)."""
     if not 1 <= min_history <= max_history < n_items:
         raise ValueError("Require 1 <= min_history <= max_history < n_items")
     if not 0.0 < in_cluster_prob < 1.0:
@@ -56,10 +58,12 @@ def generate_synthetic_interactions(
         item_ids.append(items)
         timestamps.append(np.arange(length))
 
-    return pd.DataFrame(
+    interactions = pd.DataFrame(
         {
             "user_id": np.concatenate(user_ids),
             "item_id": np.concatenate(item_ids),
             "timestamp": np.concatenate(timestamps),
         }
     )
+    categories = pd.DataFrame({"item_id": np.arange(n_items), "category": item_cluster})
+    return interactions, categories

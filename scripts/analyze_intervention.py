@@ -5,7 +5,7 @@ Prints (1) per-action rescue/damage/net over all users, (2) routing headroom
 full tables to the run directory.
 
 Example:
-    python scripts/analyze_intervention.py --config configs/experiment/toy_popularity_penalty.yaml
+    python scripts/analyze_intervention.py --config configs/experiment/toy_reranking.yaml
     python scripts/analyze_intervention.py --config ... --override interventions.0.params.penalty_weight=0.2
 """
 

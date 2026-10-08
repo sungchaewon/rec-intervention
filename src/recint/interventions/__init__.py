@@ -3,11 +3,14 @@
 from typing import Any
 
 from recint.interventions.base import IdentityIntervention, Intervention
+from recint.interventions.diversity import CalibrationReranker, MMRReranker
 from recint.interventions.popularity import PopularityPenaltyReranker
 
 INTERVENTION_REGISTRY: dict[str, type[Intervention]] = {
     "identity": IdentityIntervention,
     "popularity_penalty": PopularityPenaltyReranker,
+    "mmr": MMRReranker,
+    "calibration": CalibrationReranker,
 }
 
 
@@ -22,8 +25,10 @@ def build_intervention(config: dict[str, Any]) -> Intervention:
 
 __all__ = [
     "INTERVENTION_REGISTRY",
+    "CalibrationReranker",
     "IdentityIntervention",
     "Intervention",
+    "MMRReranker",
     "PopularityPenaltyReranker",
     "build_intervention",
 ]
