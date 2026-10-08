@@ -13,12 +13,21 @@ from recint.data.interactions import InteractionData
 class Recommender(ABC):
     """A base recommender maps users to scores over the full item catalog."""
 
+    # True if `fit(train)` never trains on each user's last train item (it is
+    # held out, e.g. for early stopping). Such a model can produce leakage-free
+    # scores for that item from the shortened history; others must be refit.
+    holds_out_last_item: bool = False
+
     @abstractmethod
     def fit(self, train: InteractionData) -> Recommender: ...
 
     @abstractmethod
-    def score(self, user_indices: np.ndarray) -> np.ndarray:
-        """Return a (len(user_indices), n_items) float score matrix."""
+    def score(self, user_indices: np.ndarray, history: InteractionData | None = None) -> np.ndarray:
+        """Return a (len(user_indices), n_items) float score matrix.
+
+        `history` (same id space) replaces the users' fitted interactions as
+        model input, e.g. a history shortened by one item for validation.
+        """
 
     def save(self, path: Path) -> None:
         raise NotImplementedError(f"{type(self).__name__} does not support checkpoints")

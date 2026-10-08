@@ -38,7 +38,8 @@ class ItemCooccurrenceRecommender(Recommender):
         self._item_similarity = cooccurrence
         return self
 
-    def score(self, user_indices: np.ndarray) -> np.ndarray:
+    def score(self, user_indices: np.ndarray, history: InteractionData | None = None) -> np.ndarray:
         if self._user_items is None or self._item_similarity is None:
             raise RuntimeError("Call fit() before score()")
-        return np.asarray(self._user_items[user_indices] @ self._item_similarity)
+        user_items = self._user_items if history is None else history.user_item_matrix()
+        return np.asarray(user_items[user_indices] @ self._item_similarity)

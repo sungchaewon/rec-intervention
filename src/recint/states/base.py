@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from recint.data.categories import ItemCategories
 from recint.data.interactions import InteractionData
 
 
@@ -16,9 +17,10 @@ class StateContext:
     `base_scores` rows align with `eval_users`; seen items are -inf. Read-only.
     """
 
-    train: InteractionData
+    train: InteractionData  # the users' history as seen by the base model
     eval_users: np.ndarray
     base_scores: np.ndarray
+    item_categories: ItemCategories | None = None
 
 
 class UserStateExtractor(ABC):

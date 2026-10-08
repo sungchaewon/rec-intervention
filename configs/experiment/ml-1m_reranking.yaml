@@ -1,4 +1,5 @@
 # Requires: python scripts/prepare_data.py --config configs/dataset/ml-1m.yaml
+# Training-free base model (item co-occurrence); useful for quick checks on CPU.
 # Referenced configs are resolved relative to this file.
 name: ml-1m_reranking
 seed: 42
@@ -6,11 +7,13 @@ seed: 42
 dataset: ../dataset/ml-1m.yaml
 model: ../model/item_cooccurrence.yaml
 
-# Actions applied to the same users; each needs a unique `label` (defaults to `name`).
+# Actions applied to the same users. `grid` expands into one action per value
+# (labels like calibration@0.25); this doubles as strength tuning for the
+# best-uniform baseline, which is chosen on the validation period.
 interventions:
-  - {name: popularity_penalty, label: popularity, params: {penalty_weight: 0.25, candidate_size: 50}}
-  - {name: mmr, label: mmr, params: {relevance_weight: 0.8, candidate_size: 50}}
-  - {name: calibration, label: calibration, params: {calibration_weight: 0.5, candidate_size: 50, list_size: 20}}
+  - {name: popularity_penalty, label: popularity, params: {candidate_size: 50}, grid: {penalty_weight: [0.1, 0.25, 0.5]}}
+  - {name: mmr, label: mmr, params: {candidate_size: 50}, grid: {relevance_weight: [0.9, 0.8, 0.6]}}
+  - {name: calibration, label: calibration, params: {candidate_size: 50, list_size: 20}, grid: {calibration_weight: [0.1, 0.25, 0.5]}}
 
 evaluation:
   metrics: [hr, ndcg]
@@ -26,11 +29,27 @@ states:
   - name: prediction_entropy
   - name: top_score
   - name: score_margin
+  - name: history_popularity
+  - name: history_category_entropy
 
 analysis:
   neutral_threshold: 0.0      # |gain| <= threshold -> neutral
   bootstrap:
     n_resamples: 1000
     confidence: 0.95
+
+# Router (scripts/route.py): trained on validation-period effects, evaluated on test.
+routing:
+  metric: hr@10               # gate/selector labels; binary -> Rescue/Damage
+  tiebreak_metric: ndcg@10    # breaks ties between actions that rescue the same user
+  features: [prediction_entropy, top_score, score_margin, history_length, history_popularity, history_category_entropy]
+  classifier: logistic        # logistic | gbdt
+  balance_classes: true       # up-weight the rare users some action helps (n_neg / n_pos)
+  harm_weight: 5.0            # extra BCE weight on base-correct users no action helps
+  thresholds: [0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+  n_folds: 5                  # out-of-fold predictions choose the gate threshold
+  seeds: [0, 1, 2, 3, 4]
+  uncertainty_feature: prediction_entropy
+  uncertainty_quantiles: [0.5, 0.7, 0.8, 0.9, 0.95]
 
 output_dir: outputs           # relative to the working directory

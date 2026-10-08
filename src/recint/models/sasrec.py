@@ -105,6 +105,8 @@ class SASRecNetwork(nn.Module):
 
 
 class SASRecRecommender(Recommender):
+    holds_out_last_item = True  # fit() uses each user's last train item only for early stopping
+
     def __init__(
         self,
         max_len: int,
@@ -220,10 +222,13 @@ class SASRecRecommender(Recommender):
         self._train_tokens = pad_left(train.user_sequences(), self.params["max_len"])
         self._train_fingerprint = train.fingerprint()
 
-    def score(self, user_indices: np.ndarray) -> np.ndarray:
+    def score(self, user_indices: np.ndarray, history: InteractionData | None = None) -> np.ndarray:
         if self._network is None or self._train_tokens is None:
             raise RuntimeError("Call fit() or load() before score()")
-        return self._score_tokens(self._train_tokens[user_indices])
+        if history is None:
+            return self._score_tokens(self._train_tokens[user_indices])
+        sequences = history.user_sequences()
+        return self._score_tokens(pad_left([sequences[u] for u in user_indices], self.params["max_len"]))
 
     def save(self, path: Path) -> None:
         if self._network is None:

@@ -1,6 +1,6 @@
 """User-state features and grouping.
 
-Implemented: history length; base-model confidence (prediction entropy, top
+Implemented: history length, popularity, category entropy; base-model confidence (prediction entropy, top
 score, score margin). Planned: preference drift, rating variance, cold-start
 exposure.
 """
@@ -9,11 +9,13 @@ from typing import Any
 
 from recint.states.base import StateContext, UserStateExtractor
 from recint.states.grouping import GROUPING_METHODS, assign_state_groups
-from recint.states.history import HistoryLengthState
+from recint.states.history import HistoryCategoryEntropyState, HistoryLengthState, HistoryPopularityState
 from recint.states.uncertainty import PredictionEntropyState, ScoreMarginState, TopScoreState
 
 STATE_REGISTRY: dict[str, type[UserStateExtractor]] = {
     "history_length": HistoryLengthState,
+    "history_popularity": HistoryPopularityState,
+    "history_category_entropy": HistoryCategoryEntropyState,
     "prediction_entropy": PredictionEntropyState,
     "top_score": TopScoreState,
     "score_margin": ScoreMarginState,
@@ -30,7 +32,9 @@ def build_state_extractor(config: dict[str, Any]) -> UserStateExtractor:
 __all__ = [
     "GROUPING_METHODS",
     "STATE_REGISTRY",
+    "HistoryCategoryEntropyState",
     "HistoryLengthState",
+    "HistoryPopularityState",
     "PredictionEntropyState",
     "ScoreMarginState",
     "StateContext",

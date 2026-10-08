@@ -27,7 +27,7 @@ def _run(overrides: list[str]):
 
 def test_toy_pipeline_outputs():
     result = _run([])
-    actions = {"popularity", "mmr", "calibration"}
+    actions = {"popularity@0.1", "popularity@0.5", "mmr@0.8", "calibration@0.5"}
     n_users = result.user_effects["user_id"].nunique()
     assert set(result.user_effects["action"]) == actions
     assert len(result.user_effects) == n_users * len(actions)
