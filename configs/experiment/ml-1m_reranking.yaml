@@ -80,7 +80,7 @@ frontier:
   classifiers: [logistic, gbdt]
   harm_weights: [1.0, 5.0]    # 1.0 = ablation without harm weighting
   seeds: [0, 1, 2, 3, 4]
-  n_thresholds: 41            # tau grid on P(damage) in [0, 1]
+  n_thresholds: 101           # tau candidates = quantiles of validation P(damage)
   uncertainty_feature: prediction_entropy
   uncertainty_quantiles: [0.0, 0.2, 0.4, 0.6, 0.8, 0.9]
 
