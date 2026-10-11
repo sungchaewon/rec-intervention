@@ -49,6 +49,7 @@ analysis:
 
 # Router (scripts/route.py): trained on validation-period effects, evaluated on test.
 routing:
+  action_prefixes: [fusion]   # router chooses among these actions (+ no-op); omit for all
   metric: ndcg@10             # router labels (denser than HR: any rank change counts)
   tiebreak_metric: hr@10      # breaks ties between actions with equal label gain
   report_metric: hr@10        # policies are reported on this; binary -> Rescue/Damage

@@ -12,10 +12,11 @@ from recint.routing.policy import (
     oracle_choices,
     uncertainty_gate_choices,
 )
-from recint.routing.router import GateSelectorRouter, SingleStageRouter
+from recint.routing.router import GainRegressionRouter, GateSelectorRouter, SingleStageRouter
 
 __all__ = [
     "NO_OP",
+    "GainRegressionRouter",
     "GateSelectorRouter",
     "RoutingData",
     "SingleStageRouter",

@@ -14,9 +14,9 @@ from collections.abc import Sequence
 
 import numpy as np
 from sklearn.base import ClassifierMixin
-from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold
+from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
@@ -137,6 +137,63 @@ class GateSelectorRouter:
         if self.threshold is None:
             raise RuntimeError("Call fit() before choose()")
         return self._choices(self._gate, self._selector, data.features, self._n_actions, self.threshold)
+
+
+def make_regressor(kind: str, seed: int):
+    """Regression counterpart of `make_classifier`: logistic -> ridge, gbdt -> gbdt."""
+    if kind == "logistic":
+        return make_pipeline(StandardScaler(), Ridge())
+    if kind == "gbdt":
+        return HistGradientBoostingRegressor(random_state=seed)
+    raise ValueError(f"Unknown regressor {kind!r}; expected one of {CLASSIFIERS}")
+
+
+class GainRegressionRouter:
+    """Uplift-style router: regress each action's gain, apply the best predicted action
+    if its prediction exceeds a margin chosen on out-of-fold predictions.
+
+    Margin candidates are -inf (always apply the best predicted action, i.e. close to the
+    best uniform action), +inf (never intervene), and non-negative quantiles of the
+    predictions: applying an action whose predicted gain is negative is never chosen
+    except through the always-apply candidate.
+    """
+
+    def __init__(self, regressor: str, n_folds: int, seed: int, n_margins: int = 21) -> None:
+        self.regressor = regressor
+        self.n_folds = n_folds
+        self.seed = seed
+        self.n_margins = n_margins
+        self.margin: float | None = None
+
+    def _fit_models(self, features: np.ndarray, gains: np.ndarray) -> list:
+        return [make_regressor(self.regressor, self.seed).fit(features, gains[:, a]) for a in range(gains.shape[1])]
+
+    @staticmethod
+    def _predict(models: list, features: np.ndarray) -> np.ndarray:
+        return np.column_stack([model.predict(features) for model in models])
+
+    def fit(self, data: RoutingData) -> GainRegressionRouter:
+        predicted = np.zeros_like(data.gains)
+        for fit_rows, held_rows in KFold(self.n_folds, shuffle=True, random_state=self.seed).split(data.features):
+            models = self._fit_models(data.features[fit_rows], data.gains[fit_rows])
+            predicted[held_rows] = self._predict(models, data.features[held_rows])
+        best, action = predicted.max(axis=1), predicted.argmax(axis=1)
+        quantiles = np.quantile(best, np.linspace(0.0, 1.0, self.n_margins))
+        margins = np.r_[-np.inf, 0.0, quantiles[quantiles > 0], np.inf]
+
+        def policy_gain(margin: float) -> float:
+            return realized(data.gains, np.where(best > margin, action, NO_OP)).mean()
+
+        # Highest out-of-fold gain; among ties the most conservative (largest) margin.
+        self.margin = max(margins, key=lambda m: (policy_gain(m), m))
+        self._models = self._fit_models(data.features, data.gains)
+        return self
+
+    def choose(self, data: RoutingData) -> np.ndarray:
+        if self.margin is None:
+            raise RuntimeError("Call fit() before choose()")
+        predicted = self._predict(self._models, data.features)
+        return np.where(predicted.max(axis=1) > self.margin, predicted.argmax(axis=1), NO_OP)
 
 
 class SingleStageRouter:

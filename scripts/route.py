@@ -21,6 +21,7 @@ import yaml
 from recint.experiment import load_or_compute_period_effects
 from recint.routing import (
     NO_OP,
+    GainRegressionRouter,
     GateSelectorRouter,
     SingleStageRouter,
     best_uniform_choices,
@@ -48,6 +49,16 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def restrict_actions(user_effects: pd.DataFrame, prefixes: list[str] | None) -> pd.DataFrame:
+    """Keep actions whose label prefix (before '@') is listed; all actions if None."""
+    if not prefixes:
+        return user_effects
+    keep = user_effects["action"].str.split("@").str[0].isin(prefixes)
+    if not keep.any():
+        raise ValueError(f"No actions match routing.action_prefixes={prefixes}")
+    return user_effects[keep]
+
+
 def main() -> None:
     args = parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -60,8 +71,9 @@ def main() -> None:
     logging.info("training routers over seeds %s", routing["seeds"])
     columns = (routing["features"], routing["action_features"], routing["metric"],
                routing["tiebreak_metric"], routing["report_metric"])  # fmt: skip
-    valid = build_routing_data(effects.validation, *columns)
-    test = build_routing_data(effects.test, *columns)
+    prefixes = routing.get("action_prefixes")
+    valid = build_routing_data(restrict_actions(effects.validation, prefixes), *columns)
+    test = build_routing_data(restrict_actions(effects.test, prefixes), *columns)
 
     rows = [
         {"policy": "no_op", "seed": None, **evaluate_policy(test, np.full(len(test.user_ids), NO_OP))},
@@ -81,6 +93,9 @@ def main() -> None:
             router_args = dict(thresholds=routing["thresholds"], classifier=classifier,
                                n_folds=routing["n_folds"], seed=seed,
                                balance_classes=routing["balance_classes"])  # fmt: skip
+            regression = GainRegressionRouter(classifier, routing["n_folds"], seed).fit(valid)
+            rows.append({"policy": f"gain_regression[{classifier}]", "seed": seed,
+                         **evaluate_policy(test, regression.choose(test))})  # fmt: skip
             single = SingleStageRouter(classifier, seed).fit(valid)
             unweighted = GateSelectorRouter(harm_weight=1.0, **router_args).fit(valid)
             router = GateSelectorRouter(harm_weight=routing["harm_weight"], **router_args).fit(valid)

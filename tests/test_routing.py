@@ -12,6 +12,7 @@ from recint.experiment import action_label, expand_interventions, list_change_fe
 from recint.models import ItemCooccurrenceRecommender
 from recint.routing import (
     NO_OP,
+    GainRegressionRouter,
     GateSelectorRouter,
     RoutingData,
     SingleStageRouter,
@@ -122,6 +123,7 @@ def test_route_cli_smoke(tmp_path):
         capture_output=True, text=True, check=True,
     )
     assert "gate_selector[gbdt]" in completed.stdout and "oracle" in completed.stdout
+    assert "gain_regression[logistic]" in completed.stdout
     policies = pd.read_csv(tmp_path / "toy_reranking" / "routing" / "policies.csv")
     oracle = policies.set_index("policy").loc["oracle", "report_gain"]
     assert (policies["report_gain"] <= oracle + 1e-12).all()
@@ -161,3 +163,13 @@ def test_build_routing_data_spreads_action_features():
     assert data.feature_names == ["s", "changed@10[a]", "changed@10[b]"]
     np.testing.assert_array_equal(data.features, [[0, 1, 1], [1, 2, 2]])
     np.testing.assert_array_equal(data.gains, [[0.5, 0.0], [-0.5, 1.0]])
+
+
+def test_gain_regression_router_applies_only_where_predicted_gain_is_positive():
+    train, test = _learnable_data(600, seed=0), _learnable_data(400, seed=1)
+    for regressor in ("logistic", "gbdt"):
+        router = GainRegressionRouter(regressor, n_folds=3, seed=0).fit(train)
+        result = evaluate_policy(test, router.choose(test))
+        oracle = evaluate_policy(test, oracle_choices(test))
+        assert result["n_damaged"] <= 0.05 * len(test.user_ids)
+        assert result["report_gain"] > 0.8 * oracle["report_gain"]
