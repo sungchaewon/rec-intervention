@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from recint.analysis import ALL_USERS, NO_OP_ACTION
-from recint.experiment import run_intervention_experiment
+from recint.experiment import action_label, expand_interventions, run_intervention_experiment
 from recint.utils import load_experiment_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +27,7 @@ def _run(overrides: list[str]):
 
 def test_toy_pipeline_outputs():
     result = _run([])
-    actions = {"popularity@0.1", "popularity@0.5", "mmr@0.8", "calibration@0.5"}
+    actions = {action_label(c) for c in expand_interventions(load_experiment_config(TOY_CONFIG)["interventions"])}
     n_users = result.user_effects["user_id"].nunique()
     assert set(result.user_effects["action"]) == actions
     assert len(result.user_effects) == n_users * len(actions)
@@ -36,7 +36,7 @@ def test_toy_pipeline_outputs():
 
     summary = result.summary
     assert set(summary["action"]) == actions
-    assert set(summary["metric"]) == {"hr@10", "ndcg@10"}
+    assert set(summary["metric"]) == {"hr@10", "ndcg@10", "tail@10", "ild@10", "calibration@10"}
     assert set(summary.loc[summary["state"] == "history_length", "state_group"]) == {"short", "medium", "long"}
     overall = summary[summary["state"] == ALL_USERS]
     assert (overall["n_users"] == n_users).all()

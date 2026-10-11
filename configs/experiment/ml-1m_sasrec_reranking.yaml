@@ -16,13 +16,19 @@ model_checkpoint: outputs/checkpoints/ml-1m_sasrec_seed42/model.pt
 # (labels like calibration@0.25); this doubles as strength tuning for the
 # best-uniform baseline, which is chosen on the validation period.
 interventions:
-  - {name: popularity_penalty, label: popularity, params: {candidate_size: 50}, grid: {penalty_weight: [0.1, 0.25, 0.5]}}
-  - {name: mmr, label: mmr, params: {candidate_size: 50}, grid: {relevance_weight: [0.9, 0.8, 0.6]}}
-  - {name: calibration, label: calibration, params: {candidate_size: 50, list_size: 20}, grid: {calibration_weight: [0.1, 0.25, 0.5]}}
+  # Beyond-accuracy re-rankers; grid values listed weakest first (frontier.py relies on it).
+  - {name: popularity_penalty, label: popularity, params: {candidate_size: 50}, grid: {penalty_weight: [0.1, 0.25, 0.5, 1.0]}}
+  - {name: mmr, label: mmr, params: {candidate_size: 50}, grid: {relevance_weight: [0.9, 0.8, 0.6, 0.4]}}
+  - {name: calibration, label: calibration, params: {candidate_size: 50, list_size: 20}, grid: {calibration_weight: [0.1, 0.25, 0.5, 0.8]}}
+  # Information-adding action: fuse with a second model (accuracy routing, route.py).
+  - {name: fusion, label: fusion, params: {model: {name: item_cooccurrence}}, grid: {weight: [0.2, 0.4]}}
 
 evaluation:
   metrics: [hr, ndcg]
   k_values: [10, 20]
+  beyond_accuracy:            # per-user list quality; higher is better
+    metrics: [tail, ild, calibration]
+    head_fraction: 0.2        # most popular 20% of items are the head; the rest is the long tail
 
 # All states are stored per user; states with `grouping` also get per-group summaries.
 states:
@@ -68,5 +74,23 @@ routing:
   seeds: [0, 1, 2, 3, 4]
   uncertainty_feature: prediction_entropy
   uncertainty_quantiles: [0.5, 0.7, 0.8, 0.9, 0.95]
+
+# Harm-aware routing of beyond-accuracy re-rankers (scripts/frontier.py).
+frontier:
+  families:                   # action label prefix -> the objective that re-ranker targets
+    - {prefix: popularity, objective: tail@10}
+    - {prefix: mmr, objective: ild@10}
+    - {prefix: calibration, objective: calibration@10}
+  label_metric: ndcg@10       # damage label: gain < 0
+  report_metric: hr@10        # reported accuracy; Rescue/Damage@10
+  features: [prediction_entropy, top_score, score_margin, history_length, history_popularity,
+             history_category_entropy, gap_10_11, gap_10_20, gap_10_50, top50_entropy]
+  action_features: ["changed@10", "promoted_rank@10"]
+  classifiers: [logistic, gbdt]
+  harm_weights: [1.0, 5.0]    # 1.0 = ablation without harm weighting
+  seeds: [0, 1, 2, 3, 4]
+  n_thresholds: 41            # tau grid on P(damage) in [0, 1]
+  uncertainty_feature: prediction_entropy
+  uncertainty_quantiles: [0.0, 0.2, 0.4, 0.6, 0.8, 0.9]
 
 output_dir: outputs           # relative to the working directory

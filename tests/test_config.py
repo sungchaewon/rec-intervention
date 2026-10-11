@@ -11,7 +11,7 @@ def test_referenced_sections_are_inlined():
     config = load_experiment_config(TOY_CONFIG)
     assert config["dataset"]["source"] == "synthetic"
     assert config["model"]["name"] == "item_cooccurrence"
-    assert [item["name"] for item in config["interventions"]] == ["popularity_penalty", "mmr", "calibration"]
+    assert [item["name"] for item in config["interventions"]] == ["popularity_penalty", "mmr", "calibration", "fusion"]
 
 
 def test_intervention_list_resolves_paths_and_inline_items():

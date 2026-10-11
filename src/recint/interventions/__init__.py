@@ -4,6 +4,7 @@ from typing import Any
 
 from recint.interventions.base import IdentityIntervention, Intervention
 from recint.interventions.diversity import CalibrationReranker, MMRReranker
+from recint.interventions.fusion import ScoreFusion
 from recint.interventions.popularity import PopularityPenaltyReranker
 
 INTERVENTION_REGISTRY: dict[str, type[Intervention]] = {
@@ -11,6 +12,7 @@ INTERVENTION_REGISTRY: dict[str, type[Intervention]] = {
     "popularity_penalty": PopularityPenaltyReranker,
     "mmr": MMRReranker,
     "calibration": CalibrationReranker,
+    "fusion": ScoreFusion,
 }
 
 
@@ -30,5 +32,6 @@ __all__ = [
     "Intervention",
     "MMRReranker",
     "PopularityPenaltyReranker",
+    "ScoreFusion",
     "build_intervention",
 ]

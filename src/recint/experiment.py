@@ -23,6 +23,7 @@ from recint.analysis import build_user_effect_table, routing_headroom, summarize
 from recint.data import Dataset, EvaluationSplit, InteractionData, leave_last_out, load_dataset
 from recint.interventions import build_intervention
 from recint.metrics import compute_ranking_metrics, metric_name
+from recint.metrics.beyond_accuracy import ListQualityMetrics
 from recint.models import Recommender, build_model, load_model, mask_seen_items, top_k_items
 from recint.states import StateContext, assign_state_groups, build_state_extractor
 from recint.utils import make_rngs, set_global_seed
@@ -169,21 +170,27 @@ def evaluate_period(
     depth = max([max_k] + [c.get("params", {}).get("candidate_size", max_k) for c in interventions])
     base_ranking = top_k_items(base_scores, depth)
     base_metrics = compute_ranking_metrics(base_ranking[:, :max_k], period.targets, metrics, k_values)
+    beyond = evaluation.get("beyond_accuracy")
+    quality = None
+    if beyond:
+        quality = ListQualityMetrics(history, dataset.item_categories, beyond["metrics"], beyond["head_fraction"])
+        base_metrics |= quality.compute(users, base_ranking, k_values)
 
     tables = []
     for position, intervention_config in enumerate(interventions, start=1):
         started = time.perf_counter()
         intervention = build_intervention(intervention_config).fit(history, dataset.item_categories)
         intervened_ranking = top_k_items(intervention.apply(users, base_scores), max_k)
+        intervention_metrics = compute_ranking_metrics(intervened_ranking, period.targets, metrics, k_values)
+        if quality is not None:
+            intervention_metrics |= quality.compute(users, intervened_ranking, k_values)
         tables.append(
             build_user_effect_table(
                 user_ids=dataset.interactions.user_ids[users],
                 state_values=state_values,
                 state_groups=state_groups,
                 base_metrics=base_metrics,
-                intervention_metrics=compute_ranking_metrics(
-                    intervened_ranking, period.targets, metrics, k_values
-                ),
+                intervention_metrics=intervention_metrics,
                 neutral_threshold=config["analysis"]["neutral_threshold"],
                 action=action_label(intervention_config),
                 action_features=list_change_features(base_ranking, intervened_ranking[:, :feature_k]),
@@ -197,8 +204,10 @@ def evaluate_period(
 
 
 def metric_names(config: dict[str, Any]) -> list[str]:
+    """Accuracy metrics, then beyond-accuracy metrics if configured."""
     evaluation = config["evaluation"]
-    return [metric_name(m, k) for m in evaluation["metrics"] for k in evaluation["k_values"]]
+    names = list(evaluation["metrics"]) + list((evaluation.get("beyond_accuracy") or {}).get("metrics", []))
+    return [metric_name(m, k) for m in names for k in evaluation["k_values"]]
 
 
 def run_intervention_experiment(config: dict[str, Any]) -> ExperimentResult:
@@ -249,6 +258,27 @@ def effects_cache_key(config: dict[str, Any]) -> str:
         stat = Path(checkpoint).stat()
         relevant["checkpoint_file"] = [stat.st_size, stat.st_mtime_ns]
     return hashlib.sha256(json.dumps(relevant, sort_keys=True, default=str).encode()).hexdigest()
+
+
+EFFECTS_KEY_FILENAME = "effects_key.txt"
+EFFECTS_FILENAMES = {"validation": "validation_effects.csv", "test": "test_effects.csv"}
+
+
+def load_or_compute_period_effects(config: dict[str, Any], cache_dir: Path, recompute: bool = False) -> PeriodEffects:
+    """Per-user effects are the slow part; reuse them when nothing that affects them changed."""
+    key = effects_cache_key(config)
+    key_path = cache_dir / EFFECTS_KEY_FILENAME
+    paths = {period: cache_dir / name for period, name in EFFECTS_FILENAMES.items()}
+    cached = key_path.exists() and key_path.read_text().strip() == key and all(p.exists() for p in paths.values())
+    if cached and not recompute:
+        logger.info("reusing cached per-user effects from %s", cache_dir)
+        return PeriodEffects(**{period: pd.read_csv(path) for period, path in paths.items()})
+    effects = run_period_effects(config)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    effects.validation.to_csv(paths["validation"], index=False)
+    effects.test.to_csv(paths["test"], index=False)
+    key_path.write_text(key)
+    return effects
 
 
 def run_period_effects(config: dict[str, Any]) -> PeriodEffects:

@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from recint.experiment import PeriodEffects, effects_cache_key, run_period_effects
+from recint.experiment import load_or_compute_period_effects
 from recint.routing import (
     NO_OP,
     GateSelectorRouter,
@@ -32,8 +32,6 @@ from recint.routing import (
 from recint.utils import load_experiment_config
 
 DISPLAY_FLOAT_FORMAT = "{:.4f}".format
-CACHE_KEY_FILENAME = "effects_key.txt"
-EFFECT_FILENAMES = {"validation": "validation_effects.csv", "test": "test_effects.csv"}
 UNIFORM_POLICY = "best_uniform"
 ROUTER_POLICY = "gate_selector"
 
@@ -50,30 +48,15 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_or_compute_effects(config: dict, run_dir: Path, recompute: bool) -> PeriodEffects:
-    """Per-user effects are the slow part; reuse them when nothing that affects them changed."""
-    key = effects_cache_key(config)
-    key_path = run_dir / CACHE_KEY_FILENAME
-    paths = {period: run_dir / name for period, name in EFFECT_FILENAMES.items()}
-    cached = key_path.exists() and key_path.read_text().strip() == key and all(p.exists() for p in paths.values())
-    if cached and not recompute:
-        logging.info("reusing cached per-user effects from %s", run_dir)
-        return PeriodEffects(**{period: pd.read_csv(path) for period, path in paths.items()})
-    effects = run_period_effects(config)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    effects.validation.to_csv(paths["validation"], index=False)
-    effects.test.to_csv(paths["test"], index=False)
-    key_path.write_text(key)
-    return effects
-
-
 def main() -> None:
     args = parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     config = load_experiment_config(args.config, args.override)
     routing = config["routing"]
-    run_dir = (args.output_dir or Path(config["output_dir"])) / config["name"] / "routing"
-    effects = load_or_compute_effects(config, run_dir, args.recompute)
+    experiment_dir = (args.output_dir or Path(config["output_dir"])) / config["name"]
+    run_dir = experiment_dir / "routing"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    effects = load_or_compute_period_effects(config, experiment_dir / "effects", args.recompute)
     logging.info("training routers over seeds %s", routing["seeds"])
     columns = (routing["features"], routing["action_features"], routing["metric"],
                routing["tiebreak_metric"], routing["report_metric"])  # fmt: skip
