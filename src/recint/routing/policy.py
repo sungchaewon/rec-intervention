@@ -18,15 +18,13 @@ def realized(gains: np.ndarray, choices: np.ndarray) -> np.ndarray:
 
 
 def evaluate_policy(data: RoutingData, choices: np.ndarray) -> dict[str, float]:
-    """Mean gain on the routing and tiebreak metrics, and Rescue/Damage/Net counts.
-
-    For a binary routing metric such as HR@K, rescued/damaged are Rescue@K/Damage@K.
-    """
-    gain = realized(data.gains, choices)
-    n_rescued, n_damaged = int((gain > 0).sum()), int((gain < 0).sum())
+    """Mean gain on the report and label metrics, and Rescue/Damage/Net counts on the
+    report metric (for HR@K: Rescue@K/Damage@K)."""
+    report = realized(data.report_gains, choices)
+    n_rescued, n_damaged = int((report > 0).sum()), int((report < 0).sum())
     return {
-        "mean_gain": float(gain.mean()),
-        "tiebreak_mean_gain": float(realized(data.tiebreak_gains, choices).mean()),
+        "report_gain": float(report.mean()),
+        "label_gain": float(realized(data.gains, choices).mean()),
         "n_rescued": n_rescued,
         "n_damaged": n_damaged,
         "net": n_rescued - n_damaged,

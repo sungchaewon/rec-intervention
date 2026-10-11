@@ -33,13 +33,16 @@ def build_user_effect_table(
     intervention_metrics: Mapping[str, np.ndarray],
     neutral_threshold: float,
     action: str,
+    action_features: Mapping[str, np.ndarray] | None = None,
 ) -> pd.DataFrame:
-    """Rows for one action: user, state values/groups, base/intervention/gain/effect per metric."""
+    """Rows for one action: user, state values/groups, per-action features (how the
+    action changes the list), and base/intervention/gain/effect per metric."""
     if base_metrics.keys() != intervention_metrics.keys():
         raise ValueError("base and intervention metrics must have the same keys")
     columns: dict[str, np.ndarray | str] = {USER_ID: user_ids, ACTION: action}
     columns.update(state_values)
     columns.update({group_column(name): groups for name, groups in state_groups.items()})
+    columns.update(action_features or {})
     for metric, base in base_metrics.items():
         gain = intervention_gain(base, intervention_metrics[metric])
         columns[f"{metric}_base"] = base

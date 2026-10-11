@@ -7,7 +7,11 @@ data -> split -> base model -> user states (from base scores)
 
 from __future__ import annotations
 
+import hashlib
 import itertools
+import json
+import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,6 +26,8 @@ from recint.metrics import compute_ranking_metrics, metric_name
 from recint.models import Recommender, build_model, load_model, mask_seen_items, top_k_items
 from recint.states import StateContext, assign_state_groups, build_state_extractor
 from recint.utils import make_rngs, set_global_seed
+
+logger = logging.getLogger(__name__)
 
 RNG_STREAMS = ["data", "analysis"]
 
@@ -102,10 +108,13 @@ def validate_interventions(interventions: list[dict[str, Any]], k_values: list[i
 def compute_states(
     state_configs: list[dict[str, Any]], context: StateContext
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, list[str]]]:
-    """State values for every configured state; groups only for states with `grouping`."""
+    """State values for every configured state, keyed by `label` (default: `name`);
+    groups only for states with `grouping`."""
+    labels = [c.get("label", c["name"]) for c in state_configs]
+    if len(set(labels)) != len(labels):
+        raise ValueError(f"State labels must be unique (set `label`), got {labels}")
     values, groups, groupings = {}, {}, {}
-    for state_config in state_configs:
-        name = state_config["name"]
+    for name, state_config in zip(labels, state_configs):
         values[name] = build_state_extractor(state_config).compute(context)
         grouping = state_config.get("grouping")
         if grouping is not None:
@@ -114,6 +123,23 @@ def compute_states(
             )
             groupings[name] = list(grouping["labels"])
     return values, groups, groupings
+
+
+def list_change_features(base_ranking: np.ndarray, intervened_top: np.ndarray) -> dict[str, np.ndarray]:
+    """How an action changes each user's top-K (K = intervened_top width), from the
+    lists alone (no targets): `changed@K` = items newly entering the top-K, and
+    `promoted_rank@K` = their mean 1-indexed base rank (0 if none)."""
+    k = intervened_top.shape[1]
+    base_top = base_ranking[:, :k]
+    entering = ~(intervened_top[:, :, None] == base_top[:, None, :]).any(axis=2)
+    match = intervened_top[:, :, None] == base_ranking[:, None, :]
+    base_rank = np.where(match.any(axis=2), match.argmax(axis=2) + 1, base_ranking.shape[1] + 1)
+    changed = entering.sum(axis=1)
+    promoted_rank = np.divide(
+        np.where(entering, base_rank, 0).sum(axis=1), changed,
+        out=np.zeros(len(changed)), where=changed > 0,
+    )  # fmt: skip
+    return {f"changed@{k}": changed.astype(np.float64), f"promoted_rank@{k}": promoted_rank}
 
 
 def evaluate_period(
@@ -138,13 +164,17 @@ def evaluate_period(
 
     evaluation = config["evaluation"]
     k_values, metrics = evaluation["k_values"], evaluation["metrics"]
-    max_k = max(k_values)
-    base_metrics = compute_ranking_metrics(top_k_items(base_scores, max_k), period.targets, metrics, k_values)
+    max_k, feature_k = max(k_values), min(k_values)
+    # Re-rankers only reorder base candidates, so this depth locates every promoted item.
+    depth = max([max_k] + [c.get("params", {}).get("candidate_size", max_k) for c in interventions])
+    base_ranking = top_k_items(base_scores, depth)
+    base_metrics = compute_ranking_metrics(base_ranking[:, :max_k], period.targets, metrics, k_values)
 
     tables = []
-    for intervention_config in interventions:
+    for position, intervention_config in enumerate(interventions, start=1):
+        started = time.perf_counter()
         intervention = build_intervention(intervention_config).fit(history, dataset.item_categories)
-        intervened = intervention.apply(users, base_scores)
+        intervened_ranking = top_k_items(intervention.apply(users, base_scores), max_k)
         tables.append(
             build_user_effect_table(
                 user_ids=dataset.interactions.user_ids[users],
@@ -152,12 +182,17 @@ def evaluate_period(
                 state_groups=state_groups,
                 base_metrics=base_metrics,
                 intervention_metrics=compute_ranking_metrics(
-                    top_k_items(intervened, max_k), period.targets, metrics, k_values
+                    intervened_ranking, period.targets, metrics, k_values
                 ),
                 neutral_threshold=config["analysis"]["neutral_threshold"],
                 action=action_label(intervention_config),
+                action_features=list_change_features(base_ranking, intervened_ranking[:, :feature_k]),
             )
         )
+        logger.info(
+            "%s (%d/%d) done in %.1fs",
+            action_label(intervention_config), position, len(interventions), time.perf_counter() - started,
+        )  # fmt: skip
     return pd.concat(tables, ignore_index=True), groupings
 
 
@@ -201,6 +236,21 @@ def validation_split(split: EvaluationSplit) -> EvaluationSplit:
     return leave_last_out(split.train, min_train_interactions=1)
 
 
+EFFECT_SECTIONS = ("seed", "dataset", "model", "model_checkpoint", "interventions", "states", "evaluation")
+
+
+def effects_cache_key(config: dict[str, Any]) -> str:
+    """Hash of everything that changes per-user effects (routing settings excluded).
+    A checkpoint file is identified by its size and modification time."""
+    relevant = {section: config.get(section) for section in EFFECT_SECTIONS}
+    relevant["neutral_threshold"] = config["analysis"]["neutral_threshold"]
+    checkpoint = config.get("model_checkpoint")
+    if checkpoint and Path(checkpoint).exists():
+        stat = Path(checkpoint).stat()
+        relevant["checkpoint_file"] = [stat.st_size, stat.st_mtime_ns]
+    return hashlib.sha256(json.dumps(relevant, sort_keys=True, default=str).encode()).hexdigest()
+
+
 def run_period_effects(config: dict[str, Any]) -> PeriodEffects:
     interventions = expand_interventions(config["interventions"])
     validate_interventions(interventions, config["evaluation"]["k_values"])
@@ -210,6 +260,8 @@ def run_period_effects(config: dict[str, Any]) -> PeriodEffects:
     # A model fitted on all of split.train has seen the validation targets; refit it
     # on the shortened history unless it already held them out during fitting.
     validation_model = model if model.holds_out_last_item else build_model(config["model"]).fit(validation.train)
+    logger.info("validation period: %d users, %d actions", len(validation.eval_users), len(interventions))
     valid_effects, _ = evaluate_period(config, interventions, dataset, validation_model, validation)
+    logger.info("test period: %d users, %d actions", len(split.eval_users), len(interventions))
     test_effects, _ = evaluate_period(config, interventions, dataset, model, split)
     return PeriodEffects(validation=valid_effects, test=test_effects)

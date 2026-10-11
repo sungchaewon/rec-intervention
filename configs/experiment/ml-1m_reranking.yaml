@@ -31,6 +31,11 @@ states:
   - name: score_margin
   - name: history_popularity
   - name: history_category_entropy
+  # Top-K boundary: how contested ranks around K are (K = 10 here).
+  - {name: rank_gap, label: gap_10_11, params: {upper_rank: 10, lower_rank: 11}}
+  - {name: rank_gap, label: gap_10_20, params: {upper_rank: 10, lower_rank: 20}}
+  - {name: rank_gap, label: gap_10_50, params: {upper_rank: 10, lower_rank: 50}}
+  - {name: top_entropy, label: top50_entropy, params: {top_n: 50}}
 
 analysis:
   neutral_threshold: 0.0      # |gain| <= threshold -> neutral
@@ -40,10 +45,13 @@ analysis:
 
 # Router (scripts/route.py): trained on validation-period effects, evaluated on test.
 routing:
-  metric: hr@10               # gate/selector labels; binary -> Rescue/Damage
-  tiebreak_metric: ndcg@10    # breaks ties between actions that rescue the same user
-  features: [prediction_entropy, top_score, score_margin, history_length, history_popularity, history_category_entropy]
-  classifier: logistic        # logistic | gbdt
+  metric: ndcg@10             # router labels (denser than HR: any rank change counts)
+  tiebreak_metric: hr@10      # breaks ties between actions with equal label gain
+  report_metric: hr@10        # policies are reported on this; binary -> Rescue/Damage
+  features: [prediction_entropy, top_score, score_margin, history_length, history_popularity,
+             history_category_entropy, gap_10_11, gap_10_20, gap_10_50, top50_entropy]
+  action_features: ["changed@10", "promoted_rank@10"]   # one column per action
+  classifiers: [logistic, gbdt]
   balance_classes: true       # up-weight the rare users some action helps (n_neg / n_pos)
   harm_weight: 5.0            # extra BCE weight on base-correct users no action helps
   thresholds: [0.02, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]

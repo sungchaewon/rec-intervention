@@ -39,6 +39,46 @@ class PredictionEntropyState(UserStateExtractor):
         return np.divide(entropy, max_entropy, out=np.zeros_like(entropy), where=n_candidates > 1)
 
 
+def _sorted_top(scores: np.ndarray, n: int) -> np.ndarray:
+    """(n_users, n) base scores in descending order."""
+    return -np.sort(-np.partition(scores, -n, axis=1)[:, -n:], axis=1)
+
+
+class RankGapState(UserStateExtractor):
+    """Score gap between ranks `upper_rank` and `lower_rank` (1-indexed) of the base list.
+
+    With upper_rank = K this measures how contested the top-K boundary is: a small
+    gap means a re-ranker can easily swap items across it.
+    """
+
+    def __init__(self, upper_rank: int, lower_rank: int) -> None:
+        if not 1 <= upper_rank < lower_rank:
+            raise ValueError("Require 1 <= upper_rank < lower_rank")
+        self.upper_rank = upper_rank
+        self.lower_rank = lower_rank
+
+    def compute(self, context: StateContext) -> np.ndarray:
+        top = _sorted_top(context.base_scores, self.lower_rank)
+        gap = top[:, self.upper_rank - 1] - top[:, self.lower_rank - 1]
+        return np.where(np.isfinite(gap), gap, 0.0)
+
+
+class TopEntropyState(UserStateExtractor):
+    """Normalized entropy of softmax over the base top-`top_n` scores (spread of the head)."""
+
+    def __init__(self, top_n: int) -> None:
+        if top_n < 2:
+            raise ValueError("top_n must be >= 2")
+        self.top_n = top_n
+
+    def compute(self, context: StateContext) -> np.ndarray:
+        top = _sorted_top(context.base_scores, self.top_n)
+        finite = np.isfinite(top)
+        weights = np.where(finite, np.exp(top - top[:, :1]), 0.0)
+        probabilities = weights / weights.sum(axis=1, keepdims=True)
+        return entr(probabilities).sum(axis=1) / np.log(self.top_n)
+
+
 class TopScoreState(UserStateExtractor):
     """Highest base score among unseen items (scale depends on the base model)."""
 

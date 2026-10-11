@@ -1,8 +1,9 @@
 """User-state features and grouping.
 
-Implemented: history length, popularity, category entropy; base-model confidence (prediction entropy, top
-score, score margin). Planned: preference drift, rating variance, cold-start
-exposure.
+Implemented: history length, popularity, category entropy; base-model
+confidence (prediction entropy, top score, score margin); top-K boundary
+(rank gap, top-N entropy). Planned: preference drift, rating variance,
+cold-start exposure.
 """
 
 from typing import Any
@@ -10,7 +11,13 @@ from typing import Any
 from recint.states.base import StateContext, UserStateExtractor
 from recint.states.grouping import GROUPING_METHODS, assign_state_groups
 from recint.states.history import HistoryCategoryEntropyState, HistoryLengthState, HistoryPopularityState
-from recint.states.uncertainty import PredictionEntropyState, ScoreMarginState, TopScoreState
+from recint.states.uncertainty import (
+    PredictionEntropyState,
+    RankGapState,
+    ScoreMarginState,
+    TopEntropyState,
+    TopScoreState,
+)
 
 STATE_REGISTRY: dict[str, type[UserStateExtractor]] = {
     "history_length": HistoryLengthState,
@@ -19,6 +26,8 @@ STATE_REGISTRY: dict[str, type[UserStateExtractor]] = {
     "prediction_entropy": PredictionEntropyState,
     "top_score": TopScoreState,
     "score_margin": ScoreMarginState,
+    "rank_gap": RankGapState,
+    "top_entropy": TopEntropyState,
 }
 
 
@@ -36,8 +45,10 @@ __all__ = [
     "HistoryLengthState",
     "HistoryPopularityState",
     "PredictionEntropyState",
+    "RankGapState",
     "ScoreMarginState",
     "StateContext",
+    "TopEntropyState",
     "TopScoreState",
     "UserStateExtractor",
     "assign_state_groups",

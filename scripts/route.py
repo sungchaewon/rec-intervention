@@ -11,13 +11,14 @@ Example:
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import yaml
 
-from recint.experiment import run_period_effects
+from recint.experiment import PeriodEffects, effects_cache_key, run_period_effects
 from recint.routing import (
     NO_OP,
     GateSelectorRouter,
@@ -31,6 +32,8 @@ from recint.routing import (
 from recint.utils import load_experiment_config
 
 DISPLAY_FLOAT_FORMAT = "{:.4f}".format
+CACHE_KEY_FILENAME = "effects_key.txt"
+EFFECT_FILENAMES = {"validation": "validation_effects.csv", "test": "test_effects.csv"}
 UNIFORM_POLICY = "best_uniform"
 ROUTER_POLICY = "gate_selector"
 
@@ -43,15 +46,37 @@ def parse_args() -> argparse.Namespace:
         help="Dotted config override, e.g. routing.harm_weight=3 (repeatable)",
     )  # fmt: skip
     parser.add_argument("--output-dir", type=Path, help="Overrides `output_dir` in the config")
+    parser.add_argument("--recompute", action="store_true", help="Ignore cached per-user effects")
     return parser.parse_args()
+
+
+def load_or_compute_effects(config: dict, run_dir: Path, recompute: bool) -> PeriodEffects:
+    """Per-user effects are the slow part; reuse them when nothing that affects them changed."""
+    key = effects_cache_key(config)
+    key_path = run_dir / CACHE_KEY_FILENAME
+    paths = {period: run_dir / name for period, name in EFFECT_FILENAMES.items()}
+    cached = key_path.exists() and key_path.read_text().strip() == key and all(p.exists() for p in paths.values())
+    if cached and not recompute:
+        logging.info("reusing cached per-user effects from %s", run_dir)
+        return PeriodEffects(**{period: pd.read_csv(path) for period, path in paths.items()})
+    effects = run_period_effects(config)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    effects.validation.to_csv(paths["validation"], index=False)
+    effects.test.to_csv(paths["test"], index=False)
+    key_path.write_text(key)
+    return effects
 
 
 def main() -> None:
     args = parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     config = load_experiment_config(args.config, args.override)
     routing = config["routing"]
-    effects = run_period_effects(config)
-    columns = (routing["features"], routing["metric"], routing["tiebreak_metric"])
+    run_dir = (args.output_dir or Path(config["output_dir"])) / config["name"] / "routing"
+    effects = load_or_compute_effects(config, run_dir, args.recompute)
+    logging.info("training routers over seeds %s", routing["seeds"])
+    columns = (routing["features"], routing["action_features"], routing["metric"],
+               routing["tiebreak_metric"], routing["report_metric"])  # fmt: skip
     valid = build_routing_data(effects.validation, *columns)
     test = build_routing_data(effects.test, *columns)
 
@@ -68,46 +93,45 @@ def main() -> None:
         },
     ]
     thresholds = {}
-    for seed in routing["seeds"]:
-        router_args = dict(thresholds=routing["thresholds"], classifier=routing["classifier"],
-                           n_folds=routing["n_folds"], seed=seed,
-                           balance_classes=routing["balance_classes"])  # fmt: skip
-        single = SingleStageRouter(routing["classifier"], seed).fit(valid)
-        rows.append({"policy": "single_stage", "seed": seed, **evaluate_policy(test, single.choose(test))})
-        unweighted = GateSelectorRouter(harm_weight=1.0, **router_args).fit(valid)
-        rows.append({"policy": "gate_selector_hw1", "seed": seed, **evaluate_policy(test, unweighted.choose(test))})
-        router = GateSelectorRouter(harm_weight=routing["harm_weight"], **router_args).fit(valid)
-        rows.append({"policy": ROUTER_POLICY, "seed": seed, **evaluate_policy(test, router.choose(test))})
-        thresholds[seed] = router.threshold
+    for classifier in routing["classifiers"]:
+        for seed in routing["seeds"]:
+            router_args = dict(thresholds=routing["thresholds"], classifier=classifier,
+                               n_folds=routing["n_folds"], seed=seed,
+                               balance_classes=routing["balance_classes"])  # fmt: skip
+            single = SingleStageRouter(classifier, seed).fit(valid)
+            unweighted = GateSelectorRouter(harm_weight=1.0, **router_args).fit(valid)
+            router = GateSelectorRouter(harm_weight=routing["harm_weight"], **router_args).fit(valid)
+            for name, policy in [("single_stage", single), (f"{ROUTER_POLICY}_hw1", unweighted), (ROUTER_POLICY, router)]:
+                rows.append({"policy": f"{name}[{classifier}]", "seed": seed, **evaluate_policy(test, policy.choose(test))})
+            thresholds[(classifier, seed)] = router.threshold
     rows.append({"policy": "oracle", "seed": None, **evaluate_policy(test, oracle_choices(test))})
 
     per_seed = pd.DataFrame(rows)
     summary = per_seed.groupby("policy", sort=False).agg(
-        mean_gain=("mean_gain", "mean"),
-        gain_std=("mean_gain", "std"),
-        tiebreak_mean_gain=("tiebreak_mean_gain", "mean"),
+        report_gain=("report_gain", "mean"),
+        report_gain_std=("report_gain", "std"),
+        label_gain=("label_gain", "mean"),
         n_rescued=("n_rescued", "mean"),
         n_damaged=("n_damaged", "mean"),
         net=("net", "mean"),
         intervene_rate=("intervene_rate", "mean"),
     ).reset_index()
-    summary.insert(1, "metric_after", float(test.base.mean()) + summary["mean_gain"])
-    uniform_gain = summary.loc[summary["policy"] == UNIFORM_POLICY, "mean_gain"].item()
+    summary.insert(1, "report_after", float(test.report_base.mean()) + summary["report_gain"])
+    uniform_gain = summary.loc[summary["policy"] == UNIFORM_POLICY, "report_gain"].item()
     # Distance from the best uniform policy in seed standard deviations (learned routers only).
-    std = summary["gain_std"].where(summary["gain_std"] > 0)
-    summary["sigma_vs_uniform"] = (summary["mean_gain"] - uniform_gain) / std
+    std = summary["report_gain_std"].where(summary["report_gain_std"] > 0)
+    summary["sigma_vs_uniform"] = (summary["report_gain"] - uniform_gain) / std
 
-    run_dir = (args.output_dir or Path(config["output_dir"])) / config["name"] / "routing"
-    run_dir.mkdir(parents=True, exist_ok=True)
     with open(run_dir / "config.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, sort_keys=False)
-    effects.validation.to_csv(run_dir / "validation_effects.csv", index=False)
     per_seed.to_csv(run_dir / "policies_per_seed.csv", index=False)
     summary.to_csv(run_dir / "policies.csv", index=False)
 
     with pd.option_context("display.width", None, "display.max_columns", None):
-        print(f"Experiment: {config['name']}  routing metric: {routing['metric']} "
-              f"(tiebreak {routing['tiebreak_metric']})  base {test.base.mean():.4f}")  # fmt: skip
+        print(f"Experiment: {config['name']}  report metric: {routing['report_metric']} "
+              f"(base {test.report_base.mean():.4f})  label metric: {routing['metric']}  "
+              f"tiebreak: {routing['tiebreak_metric']}")  # fmt: skip
+        print("rescued/damaged/net count users on the report metric; label_gain is the label-metric gain")
         print(f"actions: {', '.join(test.actions)}")
         print(f"validation users: {len(valid.user_ids)}  test users: {len(test.user_ids)}  "
               f"gate thresholds per seed: {thresholds}")  # fmt: skip

@@ -6,8 +6,10 @@ from recint.data import InteractionData, leave_last_out
 from recint.states import (
     HistoryLengthState,
     PredictionEntropyState,
+    RankGapState,
     ScoreMarginState,
     StateContext,
+    TopEntropyState,
     TopScoreState,
     assign_state_groups,
 )
@@ -53,6 +55,16 @@ def test_confidence_states():
     np.testing.assert_allclose(entropy[1], 1.0)  # uniform over three candidates
     np.testing.assert_allclose(TopScoreState().compute(context), [2.0, 0.0])
     np.testing.assert_allclose(ScoreMarginState().compute(context), [1.0, 0.0])
+
+
+def test_boundary_states():
+    scores = np.array([[5.0, 4.0, 1.0, 0.0], [1.0, 1.0, 1.0, -np.inf]])
+    context = StateContext(train=None, eval_users=np.arange(2), base_scores=scores)  # type: ignore[arg-type]
+    np.testing.assert_allclose(RankGapState(upper_rank=1, lower_rank=2).compute(context), [1.0, 0.0])
+    np.testing.assert_allclose(RankGapState(upper_rank=2, lower_rank=4).compute(context), [4.0, 0.0])  # -inf -> 0
+    entropy = TopEntropyState(top_n=3).compute(context)
+    assert entropy[0] < entropy[1]
+    np.testing.assert_allclose(entropy[1], 1.0)
 
 
 def test_fixed_grouping_edges_go_to_lower_group():

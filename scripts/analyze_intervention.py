@@ -12,6 +12,7 @@ Example:
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -48,6 +49,7 @@ def print_section(title: str, table: pd.DataFrame) -> None:
 
 def main() -> None:
     args = parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
     config = load_experiment_config(args.config, args.override)
     result = run_intervention_experiment(config)
 
